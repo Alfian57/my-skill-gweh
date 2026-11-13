@@ -6,6 +6,7 @@ import { readJson } from './filesystem.js';
 export const STATE_DIRECTORY = '.my-skill-gweh';
 export const CONFIG_PATH = `${STATE_DIRECTORY}/config.json`;
 export const MANIFEST_PATH = `${STATE_DIRECTORY}/manifest.json`;
+export const BASELINE_PATH = `${STATE_DIRECTORY}/baselines.json`;
 
 export interface Config {
   version: 1;
@@ -26,7 +27,7 @@ export function defaults(): Config {
     docsLanguage: 'en',
     output: 'ai-agent-docs',
     agents: [...agents],
-    skills: ['quality', 'docs', 'contracts', 'testing'],
+    skills: ['quality', 'docs', 'contracts', 'testing', 'dependencies'],
     validation: 'ask',
     git: 'existing',
     stack: [],

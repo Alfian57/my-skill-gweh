@@ -23,17 +23,20 @@
     "format:check": "prettier --check .",
     "package": "node scripts/package.mjs",
     "test:package": "node scripts/smoke-package.mjs",
-    "prepublishOnly": "npm run check && npm test",
-    "preversion": "npm run check && npm test",
+    "verify": "node scripts/verify.mjs",
+    "prepublishOnly": "npm run verify",
+    "preversion": "npm run verify",
     "release:patch": "npm version patch",
     "release:minor": "npm version minor",
     "release:major": "npm version major",
     "version": "prettier --write package.json"
   },
   "dependencies": {
-    "@clack/prompts": "^1.9.0"
+    "@clack/prompts": "^1.9.0",
+    "commonmark": "^0.31.2"
   },
   "devDependencies": {
+    "@types/commonmark": "^0.27.10",
     "@types/node": "^22.0.0",
     "prettier": "3.10.1",
     "typescript": "^5.9.3"

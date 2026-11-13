@@ -17,6 +17,8 @@ export interface GuideTemplate {
   example?: {
     title: Localized;
     code: string;
+    language?: string;
+    stacks?: string[];
   };
   checklist: Localized[];
 }
@@ -53,10 +55,6 @@ export const guides: Record<Skill, GuideTemplate> = {
           {
             id: 'Gunakan nama yang menyatakan maksud dan tipe yang spesifik. Hindari singkatan lokal, nilai sentinel tersembunyi, serta komentar yang sekadar mengulang kode.',
             en: 'Use intention-revealing names and specific types. Avoid obscure local abbreviations, hidden sentinel values, and comments that merely repeat the code.',
-          },
-          {
-            id: 'Komponen UI di atas sekitar 250 baris adalah sinyal untuk ditinjau, bukan batas mekanis. Ekstrak bagian yang punya tanggung jawab dan perilaku mandiri.',
-            en: 'UI components above roughly 250 lines are a review signal, not a mechanical limit. Extract parts that have independent responsibilities and behavior.',
           },
           {
             id: 'Utamakan abstraksi yang sudah dipakai repository; generalisasi baru perlu lebih dari satu kebutuhan nyata atau batas domain yang jelas.',
@@ -418,6 +416,8 @@ export const guides: Record<Skill, GuideTemplate> = {
     ],
     example: {
       title: { id: 'Pola narrowing', en: 'Narrowing pattern' },
+      language: 'ts',
+      stacks: ['typescript'],
       code: `function readName(value: unknown): string | undefined {
   if (
     typeof value === 'object' &&
@@ -488,6 +488,8 @@ export const guides: Record<Skill, GuideTemplate> = {
     ],
     example: {
       title: { id: 'Laravel: route bernama', en: 'Laravel: named route' },
+      language: 'php',
+      stacks: ['laravel'],
       code: `Route::get('/orders/{order}', [OrderController::class, 'show'])
     ->name('orders.show');
 
@@ -551,6 +553,8 @@ route('orders.show', $order);`,
     ],
     example: {
       title: { id: 'Blade: error field dan CSRF', en: 'Blade: field error and CSRF' },
+      language: 'php',
+      stacks: ['laravel'],
       code: `<form method="POST" action="{{ route('profile.update') }}">
     @csrf
     <label for="name">Nama</label>
@@ -823,21 +827,6 @@ const reactGuidance: Partial<Record<Skill, Localized[]>> = {
   ],
 };
 
-const nextGuidance: Partial<Record<Skill, Localized[]>> = {
-  quality: [
-    {
-      id: 'Jika Next.js terdeteksi, pertahankan Server Component sebagai default. Letakkan `use client` sedekat mungkin dengan interaksi browser dan jangan melewatkan object server non-serializable ke client.',
-      en: 'When Next.js is detected, keep Server Components as the default. Place `use client` close to browser interaction and do not pass non-serializable server objects to clients.',
-    },
-  ],
-  routes: [
-    {
-      id: 'Pertahankan pemisahan route App Router dan file privat dengan mengikuti struktur yang benar-benar ada; jangan mengasumsikan semua direktori bernama `app/` adalah Next.js.',
-      en: 'Preserve App Router boundaries and private files by following the actual tree; do not assume every directory named `app/` is Next.js.',
-    },
-  ],
-};
-
 const goGuidance: Partial<Record<Skill, Localized[]>> = {
   quality: [
     {
@@ -872,12 +861,54 @@ export function contextualGuideSections(
   skill: Skill,
   stack: readonly string[],
   sourceEvidence: readonly string[],
+  nextRouter: 'app' | 'pages' | 'mixed' | 'unknown' = 'unknown',
 ): GuideSection[] {
   const selected = new Set(resolveStack(stack).values);
   const notes: Localized[] = [];
   if (selected.has('laravel')) notes.push(...(laravelGuidance[skill] ?? []));
   if (selected.has('react') || selected.has('inertia')) notes.push(...(reactGuidance[skill] ?? []));
-  if (selected.has('nextjs')) notes.push(...(nextGuidance[skill] ?? []));
+  if (selected.has('nextjs') && skill === 'quality') {
+    const nextNotes: Record<typeof nextRouter, Localized> = {
+      app: {
+        id: 'Project memakai Next.js App Router. Pertahankan Server Component sebagai default dan letakkan `use client` dekat interaksi browser.',
+        en: 'This project uses the Next.js App Router. Keep Server Components as the default and place `use client` close to browser interaction.',
+      },
+      pages: {
+        id: 'Project memakai Next.js Pages Router. Ikuti pola `pages/` yang ada; jangan menerapkan asumsi Server Component dari App Router.',
+        en: 'This project uses the Next.js Pages Router. Follow its existing `pages/` patterns; do not apply App Router Server Component assumptions.',
+      },
+      mixed: {
+        id: 'Project memiliki App Router dan Pages Router. Ikuti boundary router pada file yang diubah dan jangan memindahkan pola antar-router tanpa alasan.',
+        en: 'This project contains both App Router and Pages Router. Follow the changed file’s router boundary; do not transfer patterns between them without a reason.',
+      },
+      unknown: {
+        id: 'Next.js terdeteksi, tetapi router belum dapat dipastikan dari file entry. Periksa struktur route sebelum memilih pola App Router atau Pages Router.',
+        en: 'Next.js is detected, but no router entry file was identified. Inspect the route structure before choosing App Router or Pages Router patterns.',
+      },
+    };
+    notes.push(nextNotes[nextRouter]);
+  }
+  if (selected.has('nextjs') && skill === 'routes') {
+    const routerNote: Record<typeof nextRouter, Localized> = {
+      app: {
+        id: 'Pertahankan struktur App Router dan file privat sesuai pola route yang ada.',
+        en: 'Preserve the App Router structure and private files used by existing routes.',
+      },
+      pages: {
+        id: 'Pertahankan struktur Pages Router, termasuk `_app` dan `_document`, sesuai pola yang ada.',
+        en: 'Preserve the Pages Router structure, including `_app` and `_document`, used by existing routes.',
+      },
+      mixed: {
+        id: 'Periksa apakah route berada di App Router atau Pages Router sebelum mengubah file dan helper.',
+        en: 'Check whether a route belongs to App Router or Pages Router before changing files and helpers.',
+      },
+      unknown: {
+        id: 'Periksa router dari file route yang ada sebelum menerapkan pola App Router atau Pages Router.',
+        en: 'Inspect existing route files before applying App Router or Pages Router patterns.',
+      },
+    };
+    notes.push(routerNote[nextRouter]);
+  }
   if (selected.has('go')) notes.push(...(goGuidance[skill] ?? []));
   if (selected.has('gin')) notes.push(...(ginGuidance[skill] ?? []));
   if (

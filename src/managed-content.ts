@@ -3,41 +3,39 @@ import type { Document } from './render.js';
 
 export const BEGIN_MARKER = '<!-- BEGIN my-skill-gweh -->';
 export const END_MARKER = '<!-- END my-skill-gweh -->';
+const SIGNATURE = /^\r?\n<!-- my-skill-gweh-sha256:([a-f0-9]{64}) -->/u;
 
-export function fingerprint(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
+function normalizeEol(value: string): string {
+  return value.replace(/\r\n?/gu, '\n');
 }
 
-interface Replacement {
-  content: string;
-  fingerprint: string;
+export function fingerprint(content: string): string {
+  return createHash('sha256').update(normalizeEol(content)).digest('hex');
 }
 
 function ownedHash(block: string, header: string): string {
   return fingerprint(header ? `${header}\0${block}` : block);
 }
 
-/** Undefined means a conflict; never guess ownership from a filename alone. */
-export function replaceManagedContent(
-  original: string | undefined,
-  document: Document,
-  expectedHash: string | undefined,
-): Replacement | undefined {
-  const header = document.frontmatter ?? '';
-  const block = `\n${document.body.trimEnd()}\n`;
-  const wrapped = `${BEGIN_MARKER}${block}${END_MARKER}`;
-  const nextHash = ownedHash(block, header);
-  if (original === undefined) {
-    return { content: `${header}${wrapped}\n`, fingerprint: nextHash };
-  }
+function legacyRawHash(block: string, header: string): string {
+  return createHash('sha256')
+    .update(header ? `${header}\0${block}` : block)
+    .digest('hex');
+}
 
+interface ParsedManagedContent {
+  begin: number;
+  end: number;
+  prefix: string;
+  suffix: string;
+  payload: string;
+  signature?: string;
+  header: string;
+}
+
+function parseManagedContent(original: string): ParsedManagedContent | undefined {
   const begin = original.indexOf(BEGIN_MARKER);
   const end = original.indexOf(END_MARKER);
-  if (begin === -1 && end === -1) {
-    if (!document.appendable || expectedHash !== undefined) return undefined;
-    const separator = original && !original.endsWith('\n') ? '\n\n' : original ? '\n' : '';
-    return { content: `${original}${separator}${wrapped}\n`, fingerprint: nextHash };
-  }
   if (
     begin === -1 ||
     end < begin ||
@@ -47,20 +45,156 @@ export function replaceManagedContent(
     return undefined;
 
   const prefix = original.slice(0, begin);
-  const suffix = original.slice(end + END_MARKER.length);
-  const previousBlock = original.slice(begin + BEGIN_MARKER.length, end);
-  let previousHeader = '';
-  if (header) {
-    // Old versions put frontmatter inside the marker. Move it to byte zero
-    // only after its legacy fingerprint has verified ownership.
-    if (prefix) {
-      if (!/^---\r?\n[\s\S]*?\r?\n---\r?\n$/u.test(prefix)) return undefined;
-      previousHeader = prefix;
-    }
-  }
-  if (ownedHash(previousBlock, previousHeader) !== expectedHash) return undefined;
+  const inner = original.slice(begin + BEGIN_MARKER.length, end);
+  const signature = SIGNATURE.exec(inner);
+  const payload = signature ? inner.slice(signature[0].length) : inner;
+  const header = /^---\r?\n[\s\S]*?\r?\n---\r?\n$/u.test(prefix) ? prefix : '';
   return {
-    content: `${header || prefix}${wrapped}${suffix}`,
+    begin,
+    end,
+    prefix,
+    suffix: original.slice(end + END_MARKER.length),
+    payload,
+    ...(signature?.[1] ? { signature: signature[1] } : {}),
+    header,
+  };
+}
+
+export function verifiedManagedFingerprint(original: string): string | undefined {
+  const parsed = parseManagedContent(original);
+  if (!parsed?.signature) return undefined;
+  const actual = ownedHash(parsed.payload, parsed.header);
+  return actual === parsed.signature ? actual : undefined;
+}
+
+/** Return only the signed generator body, excluding markers, signature, header and user suffix. */
+export function managedPayload(original: string): string | undefined {
+  const parsed = parseManagedContent(original);
+  if (!parsed) return undefined;
+  return normalizeEol(parsed.payload).replace(/^\n/u, '').replace(/\n$/u, '');
+}
+
+/** Keep the document body and developer text around it, but remove generator metadata. */
+export function retainManagedContent(original: string): string {
+  const parsed = parseManagedContent(original);
+  if (!parsed) return original;
+  const prefix = parsed.header ? parsed.prefix.slice(parsed.header.length) : parsed.prefix;
+  const body = normalizeEol(parsed.payload)
+    .replace(/^\n/u, '')
+    .replace(/\n$/u, '')
+    .replace(/^<!-- my-skill-gweh-sha256:[a-f0-9]{64} -->\n?/u, '');
+  return `${prefix}${body}${normalizeEol(parsed.suffix)}`;
+}
+
+export function managedContentFingerprint(original: string): string | undefined {
+  const parsed = parseManagedContent(original);
+  return parsed ? ownedHash(parsed.payload, parsed.header) : undefined;
+}
+
+interface Replacement {
+  content: string;
+  fingerprint: string;
+}
+
+function eolOf(value: string): string {
+  return value.includes('\r\n') ? '\r\n' : '\n';
+}
+
+function documentContent(document: Document, eol: string, hash: string): string {
+  const body = normalizeEol(document.body).replace(/\n+$/u, '').replace(/\n/gu, eol);
+  const block = `${eol}${body}${eol}`;
+  const signature = `${eol}<!-- my-skill-gweh-sha256:${hash} -->`;
+  const header = document.frontmatter
+    ? normalizeEol(document.frontmatter).replace(/\n/gu, eol)
+    : '';
+  return `${header}${BEGIN_MARKER}${signature}${block}${END_MARKER}`;
+}
+
+/** Undefined means a conflict; never guess ownership from a filename alone. */
+export function replaceManagedContent(
+  original: string | undefined,
+  document: Document,
+  expectedHash: string | undefined,
+  options: { force?: boolean } = {},
+): Replacement | undefined {
+  const header = document.frontmatter ?? '';
+  const block = `\n${normalizeEol(document.body).replace(/\n+$/u, '')}\n`;
+  const nextHash = ownedHash(block, header);
+  if (original === undefined) {
+    return { content: documentContent(document, '\n', nextHash) + '\n', fingerprint: nextHash };
+  }
+
+  const parsed = parseManagedContent(original);
+  if (!parsed) {
+    if (options.force) {
+      return {
+        content: documentContent(document, eolOf(original), nextHash) + eolOf(original),
+        fingerprint: nextHash,
+      };
+    }
+    if (original.includes(BEGIN_MARKER) || original.includes(END_MARKER)) return undefined;
+    if (!document.appendable || expectedHash !== undefined) return undefined;
+    const eol = eolOf(original);
+    const separator = original && !original.endsWith(eol) ? `${eol}${eol}` : original ? eol : '';
+    const generated = documentContent(document, eol, nextHash);
+    return { content: `${original}${separator}${generated}${eol}`, fingerprint: nextHash };
+  }
+
+  const matchesManifest =
+    ownedHash(parsed.payload, parsed.header) === expectedHash ||
+    legacyRawHash(parsed.payload, parsed.header) === expectedHash;
+  const matchesSignature = parsed.signature === ownedHash(parsed.payload, parsed.header);
+  if (!options.force && !matchesManifest && !matchesSignature) return undefined;
+
+  if (options.force) {
+    const eol = eolOf(original);
+    if (header || parsed.header) {
+      if (parsed.prefix && !parsed.header) {
+        return { content: documentContent(document, eol, nextHash) + eol, fingerprint: nextHash };
+      }
+      const replacement = documentContent(document, eol, nextHash);
+      const normalizedHeader = header ? normalizeEol(header).replace(/\n/gu, eol) : '';
+      return {
+        content: `${normalizedHeader}${replacement.slice(normalizedHeader.length)}${parsed.suffix}`,
+        fingerprint: nextHash,
+      };
+    }
+    const replacement = documentContent(document, eol, nextHash);
+    return {
+      content: `${parsed.prefix}${replacement.slice(0, replacement.indexOf(BEGIN_MARKER))}${replacement.slice(replacement.indexOf(BEGIN_MARKER))}${parsed.suffix}`,
+      fingerprint: nextHash,
+    };
+  }
+  if (header && parsed.prefix && !parsed.header) return undefined;
+  const replacement = documentContent(document, eolOf(original), nextHash);
+  const normalizedHeader = header ? normalizeEol(header).replace(/\n/gu, eolOf(original)) : '';
+  const headerLength = normalizedHeader.length;
+  const managed = replacement.slice(headerLength);
+  return {
+    content: `${normalizedHeader || parsed.prefix}${managed}${parsed.suffix}`,
     fingerprint: nextHash,
   };
+}
+
+export function removeManagedContent(
+  original: string,
+  expectedHash: string,
+  options: { force?: boolean } = {},
+): { content: string | undefined; fingerprint: string } | undefined {
+  const parsed = parseManagedContent(original);
+  if (!parsed) return undefined;
+  const actual = ownedHash(parsed.payload, parsed.header);
+  if (
+    !options.force &&
+    actual !== expectedHash &&
+    legacyRawHash(parsed.payload, parsed.header) !== expectedHash &&
+    parsed.signature !== actual
+  )
+    return undefined;
+
+  let prefix = parsed.prefix;
+  if (parsed.header) prefix = prefix.slice(parsed.header.length);
+  const remaining = `${prefix}${parsed.suffix}`;
+  if (!remaining.trim()) return { content: undefined, fingerprint: actual };
+  return { content: remaining, fingerprint: actual };
 }

@@ -50,25 +50,37 @@ my-skill-gweh init ./application --config choices.json --non-interactive --json
 my-skill-gweh update ./application --non-interactive --json
 ```
 
-`--dry-run` lists changes without writing anything. In an interactive terminal it still asks configuration questions. `--json` with init/update requires `--non-interactive` and emits a single JSON report. Conflicts exit with status 1, including during dry-run. Cancellation exits with status 130. Invalid arguments and unsupported flag combinations fail before any writes.
+`--dry-run` lists changes without writing anything. In an interactive terminal it still asks configuration questions. `--json` with init/update requires `--non-interactive` and emits a single JSON report. Conflicts and partial results exit with status 1, including during dry-run. Choosing cancel in a conflict prompt leaves all files untouched; keyboard interruption exits with status 130. Invalid arguments and unsupported flag combinations fail before any writes.
+
+Generation JSON keeps the `changes` and `conflicts` fields and adds `conflictDetails` and `recovered`. `planned` groups proposed `writes`, `removals`, `backups`, and `metadata`; `written`, `removed`, and `backups` list operations that actually completed. Preview and blocked results leave those applied-operation lists empty. Status is `preview`, `applied`, `partial`, `blocked`, or `cancelled`; a partial result exits with status 1 and lists skipped paths.
 
 The `output` folder is relative to the project and uses `/` separators on all platforms. Traversal and reserved metadata directories are rejected. Folder names containing spaces, Unicode, `#`, or parentheses are supported, with encoded Markdown references.
 
 ## Stack detection and selection
 
-The interactive stack picker groups checkboxes into programming languages, frameworks, and libraries/integrations. Each choice includes a short description. Selecting Laravel also includes PHP, Gin includes Go, and Next.js or the Inertia React adapter includes React. The generated workflow lists each category and explains required technologies.
+The interactive stack picker groups checkboxes into programming languages, frameworks, and libraries/integrations. Each choice explains its role and automatic dependencies: Laravel includes PHP, Gin includes Go, and Next.js or the Inertia React adapter includes React. The selected stack drives generated guidance; detected technologies remain separate evidence. Initial skill checkboxes recommend common and stack-relevant skills, and can be changed before generation. UI skills are recommended only when the selected stack or scanned files indicate a UI surface; Laravel by itself does not imply one.
 
-Languages are detected from source file extensions: JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`), TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`), PHP (`.php`), and Go (`.go`). A `package.json` indicates the JavaScript package ecosystem, not that the project contains JavaScript source; a TypeScript dependency alone does not mark TypeScript as a source language. Frameworks and libraries are detected from their manifests. Source scanning skips `.git`, `node_modules`, `vendor`, `dist`, `build`, `.next`, and `coverage`, and does not follow symlinks.
+Languages are detected from source file extensions: JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`), TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`), PHP (`.php`), and Go (`.go`). A `package.json` indicates the JavaScript package ecosystem, not that the project contains JavaScript source; a TypeScript dependency alone does not mark TypeScript as a source language. Frameworks and libraries are detected from their manifests. JavaScript commands use `packageManager` metadata or a unique recognized lockfile; ambiguous lockfiles do not produce guessed package commands. Source scanning skips VCS, dependency, build and cache directories, ignores symlinks, and reports when its 20,000-entry or depth-64 budget is reached. Project JSON inputs over 32 MiB are skipped with a diagnostic.
 
 ## Generated files and updates
 
-Documentation defaults to `ai-agent-docs`. Each selected skill produces a detailed guide with actionable rules, review checks and relevant examples. The generator also writes `project-context.md` from recognized manifests, source extensions and a bounded sample of repository paths. It records declared command names without copying script bodies or running them, and it does not infer business behavior or application architecture.
+Documentation defaults to `ai-agent-docs`. Skill guides are grouped under `engineering/` and `application/`; project context and workflow live under `project/`. Each native agent skill contains only its metadata and a link to the canonical guide, so project-specific rules have one editable source. The generated layout is:
+
+```text
+ai-agent-docs/
+├── README.md
+├── engineering/  # quality, docs, contracts, testing, dependencies, zero-any
+├── application/  # routes, forms, ui-size, ui-tests, accessibility
+└── project/      # context.md, workflow.md
+```
+
+The project context map uses recognized manifests, source extensions and up to three representative paths per area. It records declared command names without copying script bodies or running them, and it does not infer business behavior or application architecture. Next.js guidance records App Router, Pages Router, mixed, or unknown based on route entry files.
 
 | Agent          | Project instructions              | Native skills      |
 | -------------- | --------------------------------- | ------------------ |
 | Codex          | `AGENTS.md`                       | `.agents/skills`   |
 | Claude Code    | `CLAUDE.md`                       | `.claude/skills`   |
-| Gemini CLI     | `GEMINI.md`                       | `.agents/skills`   |
+| Gemini CLI     | `AGENTS.md`, `GEMINI.md`          | `.agents/skills`   |
 | Cursor         | `AGENTS.md`, `.cursor/rules`      | `.agents/skills`   |
 | OpenCode       | `AGENTS.md`                       | `.agents/skills`   |
 | GitHub Copilot | `.github/copilot-instructions.md` | `.github/skills`   |
@@ -77,17 +89,17 @@ Documentation defaults to `ai-agent-docs`. Each selected skill produces a detail
 
 Agent version and organization policies may affect discovery. Reload or restart the agent after generation if necessary. No global agent settings are changed, and installation does not run a hook that modifies project files.
 
-Configuration lives in `.my-skill-gweh/config.json`; ownership fingerprints live in `.my-skill-gweh/manifest.json`. Commit both alongside generated files. Generated YAML frontmatter stays at the beginning of native skill and rule files. Its fingerprint protects it together with the managed body.
+Configuration lives in `.my-skill-gweh/config.json`; ownership fingerprints and generated guide baselines live in `.my-skill-gweh/manifest.json` and `.my-skill-gweh/baselines.json`. Commit these files alongside generated outputs. Baselines let updates merge independent edits to canonical guides. The CLI combines non-overlapping edits automatically and resolves overlapping sections one hunk at a time: keep the project text, use generated text, or keep both in project-then-generated order. A resolution is applied only while the reviewed file and generated snapshot remain unchanged. Older customized guides without a baseline require review. Generated YAML frontmatter stays at the beginning of native skill and rule files. New managed blocks include a content fingerprint so exact generated files can be recovered if the manifest is lost.
 
-Existing plain instruction files receive a marked block. Text outside that block is preserved exactly on update. Existing unowned generated-target files, edited managed content or metadata, missing markers, and duplicate markers are conflicts. A conflict aborts the entire write operation. Resolve it manually before retrying. Verified output from the original generator is migrated to the corrected frontmatter format automatically.
+Existing plain instruction files receive a marked block. Text outside that block is preserved exactly on update. Recovery skips nested repositories and nested projects with their own `.my-skill-gweh/config.json`; output configured inside a nested project is blocked, so run the CLI from that child project root. Recovery is bounded and reports truncation. Exact legacy agent pointers are recovered automatically. During flat-layout migration, developer notes outside the managed block move into the matching grouped guide and the old file is backed up. Customized output removed from the configuration prompts whether to retain it as a plain document under `<output>/retained/` or delete it after making a complete backup under `.my-skill-gweh/backups/`. Retained documents have generator markers removed and local CommonMark links rebased. Other conflicts offer keep-and-skip, backup-and-replace, or cancel; keep-and-skip is the default. Skipping applies other safe changes and reports a partial result. Non-interactive runs stop without writing when a conflict needs a decision. CommonMark parsing is used for local-link checks and retained-document link updates.
 
-Every destination, including metadata, is checked for symlinks and file/directory collisions before writing. A project lock prevents simultaneous generator writes. Files are replaced individually using temporary files; ordinary write failures trigger rollback. This is not a crash-atomic filesystem transaction: if a process is interrupted, inspect the project before removing a stale `.my-skill-gweh.lock` and retrying.
+Every destination, including metadata, is checked for symlinks and file/directory collisions before writing. Project inputs also avoid symlinks. A project lock records PID, host, and start time; `doctor` distinguishes active, stale, and unknown locks. Stale locks are not removed automatically: verify that the owner stopped before removing `.my-skill-gweh.lock`. Files are replaced individually using temporary files; ordinary write failures trigger rollback. This is not a crash-atomic filesystem transaction.
 
-`doctor` reads saved configuration, checks expected files and ownership fingerprints, and verifies local Markdown file references. It never runs project tests/builds or claims that an agent loaded the skill. Missing files, conflicts, drift, or invalid references produce status 1.
+`doctor` reads saved configuration, diagnoses missing or invalid state, checks expected files and ownership fingerprints, lock state, and local Markdown file references. It ignores code examples and accepts file or directory links. It never runs project tests/builds or claims that an agent loaded the skill. Missing files, orphaned state, conflicts, drift, lock problems, or invalid references produce status 1.
 
 ## Presets
 
-`preset save NAME` snapshots the current project's validated configuration without overwriting an existing preset. `--config choices.json` chooses a different source. Names use lowercase letters, digits and hyphens.
+`preset save NAME` snapshots the current project's validated configuration without overwriting an existing preset. Interactive init offers saved presets before the other choices; the selected preset remains editable. `--config choices.json` chooses a different source. Names use lowercase letters, digits and hyphens.
 
 Presets live under `$XDG_CONFIG_HOME/my-skill-gweh/presets`, or the platform's user configuration directory when it is unset. Read-only commands do not create this directory. `preset show NAME` prints reusable JSON; save that output to a file and pass it to `init --config`.
 
@@ -95,13 +107,10 @@ Presets live under `$XDG_CONFIG_HOME/my-skill-gweh/presets`, or the platform's u
 
 ```sh
 npm ci
-npm run check
-npm test
-npm run package
-npm run test:package -- artifacts/my-skill-gweh-0.1.2.tgz
+npm run verify
 ```
 
-`npm run format` applies Prettier. `check` verifies formatting and strict TypeScript types. Tests use isolated temporary projects and user configuration paths. CI checks Linux, macOS and Windows on Node.js 22 and 24.
+`verify` runs formatting/type checks, unit and regression tests, creates the distributable tarball, then installs and smoke-tests that exact package. The token-budget regression test counts generated characters as a repeatable proxy across Indonesian/English output, representative stacks, and Codex/Claude entrypoints; character counts are not claimed as exact token counts. `npm run format` applies Prettier. CI runs the same command on Linux, macOS and Windows with Node.js 22 and 24.
 
 Source responsibilities:
 
@@ -121,6 +130,6 @@ See [the release guide](docs/releasing.md) for initial npm setup, Trusted Publis
 
 ## Current limitations
 
-Custom template/skill imports, multi-application discovery, stack-specific recommendations, interactive conflict resolution/backups, obsolete-output deletion and a preset picker in the wizard are not implemented yet. Run init separately inside each application. Update preserves obsolete generated files rather than deleting them automatically.
+Custom template/skill imports and multi-application discovery are not implemented yet. Run init separately inside each application.
 
 No API key or network connection is required at runtime. Generated test and Git policies describe agent behavior; running this CLI does not execute those project actions.

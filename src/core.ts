@@ -5,3 +5,4 @@ export { readJson, safe } from './filesystem.js';
 export { detect } from './detection.js';
 export { render } from './render.js';
 export { generate } from './generator.js';
+export type { GenerationResult, GenerationStatus } from './generator.js';

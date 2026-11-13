@@ -12,6 +12,7 @@ test('empty project has no fabricated stack or commands', async (t) => {
     commands: {},
     ecosystems: [],
     sourceEvidence: [],
+    diagnostics: [],
   });
 });
 
@@ -79,6 +80,34 @@ test('source detection does not follow symlinked directories', async (t) => {
   assert.deepEqual((await detect(root)).stack, []);
 });
 
+test('project manifest symlinks are skipped with a diagnostic', async (t) => {
+  const root = await fixture(t);
+  const outside = await fixture(t);
+  await writeJson(outside, 'package.json', { dependencies: { next: '1' } });
+  try {
+    await fs.symlink(path.join(outside, 'package.json'), path.join(root, 'package.json'));
+  } catch (error) {
+    if (process.platform === 'win32' && error?.code === 'EPERM') {
+      t.skip('Windows user does not have permission to create file symlinks.');
+      return;
+    }
+    throw error;
+  }
+  const result = await detect(root);
+  assert.deepEqual(result.stack, []);
+  assert.match(result.diagnostics.join('\n'), /Skipped symlinked project input package\.json/u);
+});
+
+test('UI evidence comes from UI source paths rather than a JavaScript package manifest', async (t) => {
+  const root = await fixture(t);
+  await writeJson(root, 'package.json', { scripts: { build: 'vite build' } });
+  await fs.writeFile(path.join(root, 'artisan.php'), '<?php');
+  assert.equal((await detect(root)).uiEvidence, undefined);
+  await fs.mkdir(path.join(root, 'resources/views'), { recursive: true });
+  await fs.writeFile(path.join(root, 'resources/views/home.blade.php'), '<main></main>');
+  assert.equal((await detect(root)).uiEvidence, true);
+});
+
 test('Go detection ignores commented dependencies', async (t) => {
   const root = await fixture(t);
   await fs.writeFile(path.join(root, 'main.go'), 'package main');
@@ -98,9 +127,25 @@ test('invalid manifests identify their source rather than crashing with a proper
   const root = await fixture(t);
   const file = path.join(root, 'package.json');
   await fs.writeFile(file, 'broken JSON');
-  await assert.rejects(detect(root), /Invalid JSON.*package.json/);
+  assert.match((await detect(root)).diagnostics.join('\n'), /Invalid JSON in .*package.json/u);
   await writeJson(root, 'package.json', { scripts: { test: false } });
   await assert.rejects(detect(root), /Invalid scripts.*package.json/);
   await fs.writeFile(file, 'null');
-  await assert.rejects(detect(root), /Invalid project manifest/);
+  assert.match((await detect(root)).diagnostics.join('\n'), /expected a JSON object/u);
+});
+
+test('package manager follows packageManager metadata or one unique lockfile', async (t) => {
+  const root = await fixture(t);
+  await writeJson(root, 'package.json', { packageManager: 'pnpm@9.15.0' });
+  await fs.writeFile(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+  assert.equal((await detect(root)).packageManager, 'pnpm');
+
+  await fs.rm(path.join(root, 'package.json'));
+  assert.equal((await detect(root)).packageManager, 'pnpm');
+
+  await fs.writeFile(path.join(root, 'yarn.lock'), '# yarn lock');
+  const ambiguous = await detect(root);
+  assert.equal(ambiguous.packageManager, undefined);
+  assert.equal(ambiguous.packageManagerAmbiguous, true);
+  assert.deepEqual(ambiguous.packageManagerEvidence, ['pnpm-lock.yaml', 'yarn.lock']);
 });

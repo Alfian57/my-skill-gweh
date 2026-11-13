@@ -30,3 +30,7 @@ test('stack descriptions distinguish languages from frameworks and integrations'
       'Library dan integrasi: React (diperlukan oleh Inertia.js (adapter React)), Inertia.js (adapter React)',
   );
 });
+
+test('custom stack names that collide with object properties are safe', () => {
+  assert.deepEqual(resolveStack(['constructor', '__proto__']).values, ['constructor', '__proto__']);
+});

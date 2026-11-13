@@ -29,16 +29,16 @@ export const stackCatalog = {
     category: 'language',
     label: { id: 'PHP', en: 'PHP' },
     description: {
-      id: 'Bahasa pemrograman server; diperlukan oleh Laravel.',
-      en: 'Server-side programming language; required by Laravel.',
+      id: 'Bahasa pemrograman server; dipilih otomatis jika Laravel dipilih.',
+      en: 'Server-side programming language; selected automatically when Laravel is chosen.',
     },
   },
   go: {
     category: 'language',
     label: { id: 'Go', en: 'Go' },
     description: {
-      id: 'Bahasa pemrograman; diperlukan oleh Gin.',
-      en: 'Programming language; required by Gin.',
+      id: 'Bahasa pemrograman; dipilih otomatis jika Gin dipilih.',
+      en: 'Programming language; selected automatically when Gin is chosen.',
     },
   },
   laravel: {
@@ -86,12 +86,12 @@ export const stackCatalog = {
 export type StackTechnology = keyof typeof stackCatalog;
 export const stackTechnologies = Object.keys(stackCatalog) as StackTechnology[];
 
-const requirements: Partial<Record<StackTechnology, readonly StackTechnology[]>> = {
-  laravel: ['php'],
-  nextjs: ['react'],
-  gin: ['go'],
-  inertia: ['react'],
-};
+const requirements = new Map<StackTechnology, readonly StackTechnology[]>([
+  ['laravel', ['php']],
+  ['nextjs', ['react']],
+  ['gin', ['go']],
+  ['inertia', ['react']],
+]);
 
 export interface ResolvedStack {
   values: string[];
@@ -110,7 +110,7 @@ export function resolveStack(values: readonly string[]): ResolvedStack {
     }
     if (selected.has(value)) return;
     selected.add(value);
-    const children = requirements[value as StackTechnology] ?? [];
+    const children = requirements.get(value as StackTechnology) ?? [];
     for (const child of children) include(child, value);
   }
 

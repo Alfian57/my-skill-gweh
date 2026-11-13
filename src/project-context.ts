@@ -1,11 +1,20 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Config } from './config.js';
-import { isRecord } from './errors.js';
+import { isFileError, isRecord } from './errors.js';
 import { readOptional, safe } from './filesystem.js';
 import type { Detection } from './detection.js';
 import { stackCatalog, type StackTechnology } from './stack.js';
 import { BEGIN_MARKER, END_MARKER } from './managed-content.js';
+import {
+  createScanBudget,
+  PROJECT_SCAN_ENTRY_LIMIT,
+  PROJECT_SCAN_DEPTH_LIMIT,
+  readBoundedDirectory,
+  readProjectInput,
+  scanDiagnostics,
+  type ScanBudget,
+} from './project-scan.js';
 
 interface Localized {
   id: string;
@@ -32,6 +41,11 @@ export interface ProjectArea {
 export interface ProjectContext {
   name?: string;
   stack: string[];
+  detectedStack: string[];
+  packageManager?: string;
+  packageManagerEvidence: string[];
+  packageManagerAmbiguous: boolean;
+  packageManagerConflict?: string;
   ecosystems: string[];
   sourceEvidence: string[];
   facts: ProjectFact[];
@@ -39,6 +53,9 @@ export interface ProjectContext {
   areas: ProjectArea[];
   instructions: string[];
   existingSkills: string[];
+  diagnostics: string[];
+  uiEvidence: boolean;
+  nextRouter: 'app' | 'pages' | 'mixed' | 'unknown';
 }
 
 const excludedDirectories = new Set([
@@ -52,6 +69,12 @@ const excludedDirectories = new Set([
   'coverage',
   'storage',
   'target',
+  '.turbo',
+  '.cache',
+  '.output',
+  '.svelte-kit',
+  '.vercel',
+  'out',
 ]);
 
 const areaDefinitions: Array<{ label: Localized; roots: string[] }> = [
@@ -92,14 +115,39 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-async function jsonFile(root: string, filename: string): Promise<Record<string, unknown>> {
-  const raw = await readOptional(path.join(root, filename));
+function parseJsonObject(
+  raw: string | undefined,
+  filename: string,
+  diagnostics: string[],
+): Record<string, unknown> {
   if (raw === undefined) return {};
   try {
-    return record(JSON.parse(raw) as unknown);
-  } catch {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) {
+      diagnostics.push(
+        `Invalid JSON in ${filename}; expected an object, so its facts were skipped.`,
+      );
+      return {};
+    }
+    return parsed;
+  } catch (error) {
+    diagnostics.push(
+      `Invalid JSON in ${filename}; facts from this file were skipped${error instanceof Error ? ` (${error.message})` : ''}.`,
+    );
     return {};
   }
+}
+
+async function jsonFile(
+  root: string,
+  filename: string,
+  diagnostics: string[],
+): Promise<Record<string, unknown>> {
+  return parseJsonObject(
+    await readProjectInput(root, filename, diagnostics),
+    filename,
+    diagnostics,
+  );
 }
 
 function addFact(
@@ -111,13 +159,21 @@ function addFact(
   if (value) facts.push({ label, value, source });
 }
 
-function commandsFrom(manager: string, scripts: unknown): DeclaredCommand[] {
+function commandsFrom(manager: string | undefined, scripts: unknown): DeclaredCommand[] {
+  const argument = (name: string): string =>
+    /^[A-Za-z0-9_:@./+-]+$/u.test(name) ? name : `'${name.replaceAll("'", "'\\''")}'`;
   return (
     Object.keys(record(scripts))
       // Composer lifecycle hooks run as part of install/update events, not as project tasks.
       .filter((name) => manager !== 'composer' || !/^(?:pre|post)-/iu.test(name))
       .sort((left, right) => left.localeCompare(right))
-      .map((name) => ({ manager, name, invocation: `${manager} ${name}` }))
+      .map((name) => ({
+        manager: manager === 'composer' ? 'composer' : (manager ?? 'package.json'),
+        name,
+        invocation: manager
+          ? `${manager} ${argument(name)}`
+          : `script ${JSON.stringify(name)} (package manager not identified)`,
+      }))
   );
 }
 
@@ -151,35 +207,52 @@ async function collectPaths(
   relative: string,
   limit: number,
   output: string,
+  budget: ScanBudget,
 ): Promise<string[]> {
   const found: string[] = [];
   if (isGeneratedPath(relative, output)) return found;
-  const pending = [relative];
-  while (pending.length && found.length < limit) {
-    const current = pending.shift();
-    if (!current) continue;
+  const pending: Array<{ relative: string; depth: number }> = [{ relative, depth: 0 }];
+  let cursor = 0;
+  while (
+    cursor < pending.length &&
+    found.length < limit &&
+    budget.visited < PROJECT_SCAN_ENTRY_LIMIT &&
+    !budget.truncated
+  ) {
+    const item = pending[cursor++];
+    if (!item) continue;
+    const { relative: current, depth } = item;
     let entries;
     try {
-      entries = await fs.readdir(safe(root, current), { withFileTypes: true });
-    } catch {
+      entries = await readBoundedDirectory(safe(root, current), budget);
+    } catch (error) {
+      if (isFileError(error, 'EACCES') || isFileError(error, 'EPERM'))
+        budget.diagnostics.push(`Skipped unreadable repository directory ${current}.`);
       continue;
     }
-    entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       const child = path.posix.join(current.split(path.sep).join('/'), entry.name);
       if (entry.isDirectory()) {
-        if (!excludedDirectories.has(entry.name.toLowerCase()) && !isGeneratedPath(child, output))
-          pending.push(child);
+        if (!excludedDirectories.has(entry.name.toLowerCase()) && !isGeneratedPath(child, output)) {
+          if (depth >= PROJECT_SCAN_DEPTH_LIMIT) budget.truncated = true;
+          else pending.push({ relative: child, depth: depth + 1 });
+        }
       } else if (entry.isFile() && !/^\.env(?:\.|$)/iu.test(entry.name)) {
         found.push(child);
         if (found.length >= limit) break;
       }
     }
   }
+  if (cursor < pending.length && budget.visited >= PROJECT_SCAN_ENTRY_LIMIT)
+    budget.truncated = true;
   return found;
 }
 
-async function collectAreas(root: string, output: string): Promise<ProjectArea[]> {
+async function collectAreas(
+  root: string,
+  output: string,
+  budget: ScanBudget,
+): Promise<ProjectArea[]> {
   const areas: ProjectArea[] = [];
   for (const definition of areaDefinitions) {
     const paths: string[] = [];
@@ -191,13 +264,13 @@ async function collectAreas(root: string, output: string): Promise<ProjectArea[]
         paths.push(candidate);
       } else {
         paths.push(
-          ...(await collectPaths(root, candidate, Math.max(1, 12 - paths.length), output)),
+          ...(await collectPaths(root, candidate, Math.max(1, 3 - paths.length), output, budget)),
         );
       }
-      if (paths.length >= 12) break;
+      if (paths.length >= 3) break;
     }
     if (paths.length)
-      areas.push({ label: definition.label, paths: [...new Set(paths)].slice(0, 12) });
+      areas.push({ label: definition.label, paths: [...new Set(paths)].slice(0, 3) });
   }
   return areas;
 }
@@ -205,6 +278,7 @@ async function collectAreas(root: string, output: string): Promise<ProjectArea[]
 async function collectGuidance(
   root: string,
   output: string,
+  budget: ScanBudget,
 ): Promise<{ instructions: string[]; skills: string[] }> {
   const instructionFiles = [
     'AGENTS.md',
@@ -219,7 +293,7 @@ async function collectGuidance(
   for (const candidate of instructionFiles) {
     if (!(await exists(root, candidate))) continue;
     if (candidate.endsWith('/rules')) {
-      const files = await collectPaths(root, candidate, 10, output);
+      const files = await collectPaths(root, candidate, 10, output, budget);
       for (const file of files) {
         if (await containsUserInstructions(root, file)) instructions.push(file);
       }
@@ -238,7 +312,7 @@ async function collectGuidance(
     '.windsurf/skills',
   ]) {
     if (!(await exists(root, directory))) continue;
-    for (const file of await collectPaths(root, directory, 30, output)) {
+    for (const file of await collectPaths(root, directory, 30, output, budget)) {
       if (!file.endsWith('/SKILL.md') || file.includes('/my-skill-gweh-')) continue;
       skills.push(file);
       if (skills.length >= 24) return { instructions, skills };
@@ -280,12 +354,20 @@ export async function collectProjectContext(
   config: Config,
   detection: Detection,
 ): Promise<ProjectContext> {
-  const composer = await jsonFile(root, 'composer.json');
-  const composerLock = await jsonFile(root, 'composer.lock');
-  const packageJson = await jsonFile(root, 'package.json');
-  const packageLock = await jsonFile(root, 'package-lock.json');
+  const diagnostics = [...(detection.diagnostics ?? [])];
+  const budget = createScanBudget();
+  const composer = await jsonFile(root, 'composer.json', diagnostics);
+  const composerLockRaw = await readProjectInput(root, 'composer.lock', diagnostics);
+  const composerLock = parseJsonObject(composerLockRaw, 'composer.lock', diagnostics);
+  const packageJson = await jsonFile(root, 'package.json', diagnostics);
+  const packageLockRaw =
+    detection.packageManager === 'npm'
+      ? await readProjectInput(root, 'package-lock.json', diagnostics)
+      : undefined;
+  const npmLockAvailable = packageLockRaw !== undefined;
+  const packageLock = parseJsonObject(packageLockRaw, 'package-lock.json', diagnostics);
   const facts: ProjectFact[] = [];
-  const stack = [...new Set([...config.stack, ...detection.stack])];
+  const stack = [...config.stack];
   const composerName = stringValue(composer.name);
   const packageName = stringValue(packageJson.name);
   let projectName = composerName ?? packageName;
@@ -330,14 +412,21 @@ export async function collectProjectContext(
       facts,
       { id: `Dependency ${label.id}`, en: `Dependency ${label.en}` },
       value,
-      composerDependency ? 'composer.json / composer.lock' : 'package.json / package-lock.json',
+      composerDependency
+        ? `composer.json${composerLockRaw === undefined ? '' : ' / composer.lock'}`
+        : `package.json${npmLockAvailable ? ' / package-lock.json' : ''}`,
     );
   }
 
-  const npmScripts = commandsFrom('npm run', packageJson.scripts);
+  const managerPrefix = detection.packageManager
+    ? ({ npm: 'npm run', pnpm: 'pnpm run', yarn: 'yarn run', bun: 'bun run' } as const)[
+        detection.packageManager
+      ]
+    : undefined;
+  const npmScripts = commandsFrom(managerPrefix, packageJson.scripts);
   const composerScripts = commandsFrom('composer', composer.scripts);
   const commands = [...composerScripts, ...npmScripts];
-  const goMod = await readOptional(path.join(root, 'go.mod'));
+  const goMod = await readProjectInput(root, 'go.mod', diagnostics);
   if (goMod) {
     const moduleName = /^\s*module\s+(\S+)/mu.exec(goMod)?.[1];
     const goVersion = /^\s*go\s+(\S+)/mu.exec(goMod)?.[1];
@@ -346,16 +435,73 @@ export async function collectProjectContext(
     addFact(facts, { id: 'Versi Go', en: 'Go version' }, goVersion, 'go.mod');
   }
 
-  const guidance = await collectGuidance(root, config.output);
+  const guidance = await collectGuidance(root, config.output, budget);
   return {
     ...(projectName ? { name: projectName } : {}),
     stack,
+    detectedStack: detection.stack,
+    ...(detection.packageManager ? { packageManager: detection.packageManager } : {}),
+    packageManagerEvidence: detection.packageManagerEvidence ?? [],
+    packageManagerAmbiguous: detection.packageManagerAmbiguous ?? false,
+    ...(detection.packageManagerConflict
+      ? { packageManagerConflict: detection.packageManagerConflict }
+      : {}),
     ecosystems: detection.ecosystems,
     sourceEvidence: detection.sourceEvidence,
     facts,
     commands,
-    areas: await collectAreas(root, config.output),
+    areas: await collectAreas(root, config.output, budget),
     instructions: guidance.instructions,
     existingSkills: guidance.skills,
+    diagnostics: [...diagnostics, ...scanDiagnostics(budget)],
+    uiEvidence: detection.uiEvidence ?? false,
+    nextRouter: await detectNextRouter(root),
   };
+}
+
+async function detectNextRouter(root: string): Promise<ProjectContext['nextRouter']> {
+  const appFiles = [
+    'app/page.js',
+    'app/page.jsx',
+    'app/page.ts',
+    'app/page.tsx',
+    'app/page.mjs',
+    'app/page.mts',
+    'src/app/page.js',
+    'src/app/page.jsx',
+    'src/app/page.ts',
+    'src/app/page.tsx',
+    'app/layout.js',
+    'app/layout.jsx',
+    'app/layout.ts',
+    'app/layout.tsx',
+    'src/app/layout.js',
+    'src/app/layout.jsx',
+    'src/app/layout.ts',
+    'src/app/layout.tsx',
+  ];
+  const pagesFiles = [
+    'pages/_app.js',
+    'pages/_app.jsx',
+    'pages/_app.ts',
+    'pages/_app.tsx',
+    'pages/index.js',
+    'pages/index.jsx',
+    'pages/index.ts',
+    'pages/index.tsx',
+    'src/pages/_app.js',
+    'src/pages/_app.jsx',
+    'src/pages/_app.ts',
+    'src/pages/_app.tsx',
+    'src/pages/index.js',
+    'src/pages/index.jsx',
+    'src/pages/index.ts',
+    'src/pages/index.tsx',
+  ];
+  const app = (await Promise.all(appFiles.map((file) => exists(root, file)))).some(Boolean);
+  const pages = (await Promise.all(pagesFiles.map((file) => exists(root, file)))).some(Boolean);
+  if (app && pages) return 'mixed';
+  if (app) return 'app';
+  if (pages) return 'pages';
+  return 'unknown';
 }

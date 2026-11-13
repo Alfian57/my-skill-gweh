@@ -1,11 +1,80 @@
 import path from 'node:path';
 import { rules, type Agent, type Language, type Skill } from './catalog.js';
-import { validate, CONFIG_PATH, MANIFEST_PATH, type Config } from './config.js';
+import { validate, BASELINE_PATH, CONFIG_PATH, MANIFEST_PATH, type Config } from './config.js';
 import { safe } from './filesystem.js';
 import { contextualGuideSections, guides, localized, type GuideSection } from './guides.js';
 import { collectProjectContext, type ProjectContext } from './project-context.js';
 import { detect, type Detection } from './detection.js';
 import { formatStack } from './stack.js';
+
+const skillGroups: Record<Skill, 'engineering' | 'application'> = {
+  quality: 'engineering',
+  docs: 'engineering',
+  contracts: 'engineering',
+  testing: 'engineering',
+  dependencies: 'engineering',
+  'zero-any': 'engineering',
+  routes: 'application',
+  forms: 'application',
+  'ui-size': 'application',
+  'ui-tests': 'application',
+  accessibility: 'application',
+};
+
+const skillDescriptions: Record<Skill, Record<Language, string>> = {
+  quality: {
+    en: 'Use for module boundaries, code organization, abstraction choices, and maintainability reviews.',
+    id: 'Gunakan untuk batas modul, susunan kode, pilihan abstraksi, dan review kemudahan pemeliharaan.',
+  },
+  docs: {
+    en: 'Use when a change affects behavior, setup, contracts, operations, or project documentation.',
+    id: 'Gunakan saat perubahan memengaruhi perilaku, setup, kontrak, operasi, atau dokumentasi proyek.',
+  },
+  contracts: {
+    en: 'Use when changing API behavior, authorization, ownership, privacy, or persistence boundaries.',
+    id: 'Gunakan saat mengubah perilaku API, otorisasi, ownership, privasi, atau batas persistence.',
+  },
+  testing: {
+    en: 'Use to plan or review regression coverage for changed behavior and failure cases.',
+    id: 'Gunakan untuk merencanakan atau meninjau test regresi bagi perilaku dan kasus gagal yang berubah.',
+  },
+  'ui-size': {
+    en: 'Use when reviewing large UI components or deciding whether a component should be split.',
+    id: 'Gunakan saat meninjau komponen UI besar atau menentukan apakah komponen perlu dipecah.',
+  },
+  'zero-any': {
+    en: 'Use when editing TypeScript types or reviewing `any` and type-suppression usage.',
+    id: 'Gunakan saat mengedit tipe TypeScript atau meninjau penggunaan `any` dan penonaktifan tipe.',
+  },
+  routes: {
+    en: 'Use when changing route registration, URL behavior, middleware, or navigation.',
+    id: 'Gunakan saat mengubah registrasi route, perilaku URL, middleware, atau navigasi.',
+  },
+  forms: {
+    en: 'Use when implementing form fields, validation, submission, and visible error states.',
+    id: 'Gunakan saat membuat field form, validasi, submit, dan status error yang terlihat.',
+  },
+  'ui-tests': {
+    en: 'Use when testing interactive UI behavior and user-visible outcomes.',
+    id: 'Gunakan saat menguji interaksi UI dan hasil yang terlihat oleh pengguna.',
+  },
+  accessibility: {
+    en: 'Use when changing controls, keyboard flow, focus behavior, or accessible names.',
+    id: 'Gunakan saat mengubah kontrol, alur keyboard, focus, atau nama aksesibel.',
+  },
+  dependencies: {
+    en: 'Use when adding, updating, or removing project dependencies.',
+    id: 'Gunakan saat menambah, memperbarui, atau menghapus dependency proyek.',
+  },
+};
+
+export function skillGuidePath(output: string, skill: Skill): string {
+  return `${output}/${skillGroups[skill]}/${skill}.md`;
+}
+
+export function projectGuidePath(output: string, guide: 'context' | 'workflow'): string {
+  return `${output}/project/${guide}.md`;
+}
 
 export interface Document {
   body: string;
@@ -77,50 +146,39 @@ function sectionMarkdown(section: GuideSection, language: Language): string {
 function guideMarkdown(skill: Skill, config: Config, context: ProjectContext): string {
   const language = config.docsLanguage;
   const template = guides[skill];
-  const extra = contextualGuideSections(skill, context.stack, context.sourceEvidence);
+  const extra = contextualGuideSections(
+    skill,
+    context.stack,
+    context.sourceEvidence,
+    context.nextRouter,
+  );
   const sections = [...template.sections, ...extra].map((section) =>
     sectionMarkdown(section, language),
   );
-  const example = template.example
-    ? `## ${localized(template.example.title, language)}\n\n\`\`\`${skill === 'zero-any' ? 'ts' : 'php'}\n${template.example.code}\n\`\`\`\n`
-    : '';
-  const checklistTitle = language === 'en' ? 'Review checklist' : 'Checklist review';
+  const example =
+    template.example &&
+    template.example.stacks?.some((technology) => context.stack.includes(technology))
+      ? `## ${localized(template.example.title, language)}\n\n\`\`\`${template.example.language ?? 'text'}\n${template.example.code}\n\`\`\`\n`
+      : '';
   const projectLink = localLink(
-    `${config.output}/${skill}.md`,
-    `${config.output}/project-context.md`,
+    skillGuidePath(config.output, skill),
+    projectGuidePath(config.output, 'context'),
   );
-  const workflowLink = localLink(`${config.output}/${skill}.md`, `${config.output}/workflow.md`);
   return [
     `# ${skill}\n\n${rules[skill][language]}`,
     ...sections,
     example,
-    `## ${checklistTitle}\n\n${template.checklist.map((item) => `- [ ] ${localized(item, language)}`).join('\n')}`,
-    `[${language === 'en' ? 'Project context map' : 'Peta konteks proyek'}](${projectLink}) · [Workflow](${workflowLink})`,
+    `[${language === 'en' ? 'Project context' : 'Konteks proyek'}](${projectLink})`,
   ]
     .filter(Boolean)
     .join('\n\n');
 }
 
-function nativeSkillMarkdown(
-  skill: Skill,
-  file: string,
-  config: Config,
-  context: ProjectContext,
-): string {
+function nativeSkillMarkdown(skill: Skill, file: string, config: Config): string {
   const language = config.docsLanguage;
-  const template = guides[skill];
-  const extra = contextualGuideSections(skill, context.stack, context.sourceEvidence);
-  const usefulBullets = [
-    ...template.sections.flatMap((section) => section.bullets),
-    ...extra.flatMap((section) => section.bullets),
-  ].slice(0, 5);
-  const fullGuide = localLink(file, `${config.output}/${skill}.md`);
-  const projectMap = localLink(file, `${config.output}/project-context.md`);
-  const title = language === 'en' ? 'Apply this skill' : 'Terapkan skill ini';
-  const checks = language === 'en' ? 'Before finishing' : 'Sebelum selesai';
-  const verify = template.checklist.slice(0, 2).map((item) => `- [ ] ${localized(item, language)}`);
-  const instructions = usefulBullets.map((item) => `- ${localized(item, language)}`);
-  return `# ${skill}\n\n${rules[skill][language]}\n\n## ${title}\n\n${instructions.join('\n')}\n\n## ${checks}\n\n${verify.join('\n')}\n\n[${language === 'en' ? 'Read the full guide' : 'Baca panduan lengkap'}](${fullGuide}) · [${language === 'en' ? 'Project context map' : 'Peta konteks proyek'}](${projectMap})`;
+  const canonicalGuide = localLink(file, skillGuidePath(config.output, skill));
+  const instruction = language === 'en' ? 'Follow the project guide:' : 'Ikuti panduan proyek:';
+  return `# ${skill}\n\n${instruction} [${skill}](${canonicalGuide})`;
 }
 
 function projectMap(context: ProjectContext, config: Config): string {
@@ -137,11 +195,54 @@ function projectMap(context: ProjectContext, config: Config): string {
   ];
 
   if (context.name) lines.push('', `## ${heading('Project', 'Proyek')}`, '', code(context.name));
-  lines.push('', `## ${heading('Detected stack', 'Stack terdeteksi')}`, '');
+  if (context.packageManager || context.packageManagerEvidence.length) {
+    lines.push('', `## ${heading('Package manager', 'Package manager')}`, '');
+    lines.push(
+      context.packageManager
+        ? code(context.packageManager)
+        : heading(
+            'Not identified; no package command is assumed.',
+            'Tidak teridentifikasi; command package tidak diasumsikan.',
+          ),
+    );
+    if (context.packageManagerEvidence.length) {
+      lines.push(
+        `- ${heading('Evidence', 'Bukti')}: ${context.packageManagerEvidence.map(code).join(', ')}`,
+      );
+    }
+    if (context.packageManagerConflict) {
+      lines.push(`- ${heading('Warning', 'Peringatan')}: ${code(context.packageManagerConflict)}`);
+    } else if (context.packageManagerAmbiguous) {
+      lines.push(
+        `- ${heading('Warning', 'Peringatan')}: ${heading('Multiple lockfiles are present; verify the intended package manager.', 'Ada beberapa lockfile; verifikasi package manager yang digunakan.')}`,
+      );
+    }
+  }
+  lines.push('', `## ${heading('Selected stack', 'Stack pilihan')}`, '');
   lines.push(
     formatStack(context.stack, language, { markdown: true }) ||
       heading('No stack evidence found.', 'Tidak ada bukti stack yang ditemukan.'),
   );
+  lines.push('', `## ${heading('Detected stack evidence', 'Bukti stack terdeteksi')}`, '');
+  lines.push(
+    formatStack(context.detectedStack, language, { markdown: true }) ||
+      heading('No stack evidence found.', 'Tidak ada bukti stack yang ditemukan.'),
+  );
+  if (context.stack.includes('nextjs')) {
+    const routers: Record<ProjectContext['nextRouter'], { en: string; id: string }> = {
+      app: { en: 'App Router', id: 'App Router' },
+      pages: { en: 'Pages Router', id: 'Pages Router' },
+      mixed: { en: 'App Router and Pages Router', id: 'App Router dan Pages Router' },
+      unknown: {
+        en: 'Not identified from route entry files',
+        id: 'Belum teridentifikasi dari file route',
+      },
+    };
+    lines.push(
+      '',
+      `- ${heading('Next.js router', 'Router Next.js')}: ${routers[context.nextRouter][language]}`,
+    );
+  }
 
   if (context.ecosystems.length || context.sourceEvidence.length) {
     lines.push('', `## ${heading('Repository evidence', 'Bukti repository')}`, '');
@@ -193,8 +294,8 @@ function projectMap(context: ProjectContext, config: Config): string {
     lines.push('', `## ${heading('Repository map', 'Peta repository')}`, '');
     lines.push(
       heading(
-        'Paths below are a bounded sample of files in recognized areas. Inspect the actual files before treating a path name as proof of behavior.',
-        'Path di bawah adalah sampel terbatas file di area yang dikenali. Buka file sebenarnya sebelum menganggap nama path sebagai bukti perilaku.',
+        'Representative paths are navigation hints, not proof of behavior.',
+        'Path contoh hanya petunjuk navigasi, bukan bukti perilaku.',
       ),
     );
     for (const area of context.areas) {
@@ -219,15 +320,35 @@ function projectMap(context: ProjectContext, config: Config): string {
     lines.push('', `## ${heading('Existing skills', 'Skill yang sudah ada')}`, '');
     lines.push(context.existingSkills.map((item) => `- ${code(item)}`).join('\n'));
   }
+  if (context.diagnostics.length) {
+    lines.push('', `## ${heading('Detection notes', 'Catatan deteksi')}`, '');
+    lines.push(context.diagnostics.map((item) => `- ${item}`).join('\n'));
+  }
 
   return `${lines.join('\n')}\n`;
+}
+
+function gitWorkflow(policy: Config['git'], language: Language): string {
+  if (policy === 'existing') {
+    return language === 'en'
+      ? "Use the repository's documented branch and review conventions. Inspect the branch and working tree before finishing. Ask before committing, pushing, merging, or creating a remote resource unless the current task explicitly requests that action."
+      : 'Ikuti konvensi branch dan review yang didokumentasikan repository. Periksa branch dan working tree sebelum selesai. Minta izin sebelum commit, push, merge, atau membuat resource remote kecuali tindakan itu diminta secara eksplisit dalam tugas.';
+  }
+  if (policy === 'feature-pr') {
+    return language === 'en'
+      ? 'Create a focused feature branch from the current integration branch. Implement the request, run allowed checks, inspect the final diff, and summarize the change. Ask before committing, pushing, or opening a PR unless requested; ask separately before merging unless the task requests the merge.'
+      : 'Buat feature branch terfokus dari branch integrasi saat ini. Implementasikan permintaan, jalankan pemeriksaan yang diizinkan, tinjau diff akhir, lalu rangkum perubahan. Minta izin sebelum commit, push, atau membuka PR kecuali diminta; minta izin terpisah sebelum merge kecuali tugas meminta merge tersebut.';
+  }
+  return language === 'en'
+    ? 'Create a focused feature branch from staging. After review, ask before committing or pushing it to staging unless requested. Run the agreed checks, then ask separately before promoting staging to main unless the task requests promotion. Never merge or push to main without explicit approval.'
+    : 'Buat feature branch terfokus dari staging. Setelah review, minta izin sebelum commit atau push ke staging kecuali diminta. Jalankan pemeriksaan yang disepakati, lalu minta izin terpisah sebelum mempromosikan staging ke main kecuali tugas meminta promosi. Jangan merge atau push ke main tanpa persetujuan eksplisit.';
 }
 
 /** Check all file/directory collisions before any output can be written. */
 export function renderDocuments(
   root: string,
   config: Config,
-  detection: Detection,
+  _detection: Detection,
   context: ProjectContext,
 ): Record<string, Document> {
   validate(config);
@@ -236,28 +357,50 @@ export function renderDocuments(
   const language = config.docsLanguage;
   const english = language === 'en';
   const indexFile = `${config.output}/README.md`;
-  const contextFile = `${config.output}/project-context.md`;
-  const workflowFile = `${config.output}/workflow.md`;
+  const contextFile = projectGuidePath(config.output, 'context');
+  const workflowFile = projectGuidePath(config.output, 'workflow');
+  const engineeringSkills = (Object.keys(skillGroups) as Skill[]).filter(
+    (skill) => skillGroups[skill] === 'engineering' && config.skills.includes(skill),
+  );
+  const applicationSkills = (Object.keys(skillGroups) as Skill[]).filter(
+    (skill) => skillGroups[skill] === 'application' && config.skills.includes(skill),
+  );
+  const indexGroup = (title: string, skills: Skill[]): string =>
+    skills.length
+      ? `## ${title}\n\n${skills.map((skill) => `- [${skill}](${skillGroups[skill]}/${skill}.md)`).join('\n')}`
+      : '';
   const pointer = (file: string): string =>
     english
-      ? `Before editing, read the [engineering guidelines](${localLink(file, indexFile)}), [project context map](${localLink(file, contextFile)}), and [workflow](${localLink(file, workflowFile)}). Then open the relevant skill guide linked from the index. Follow more specific repository instructions where they apply.\n`
-      : `Sebelum mengedit, baca [panduan engineering](${localLink(file, indexFile)}), [peta konteks proyek](${localLink(file, contextFile)}), dan [workflow](${localLink(file, workflowFile)}). Lalu buka panduan skill terkait dari index. Ikuti instruksi repository yang lebih spesifik bila berlaku.\n`;
+      ? `Start with the [index](${localLink(file, indexFile)}); read only the relevant skill guide. Open the [project workflow](${localLink(file, workflowFile)}) before running checks or changing Git state, and follow more specific repository instructions. For database work, ask whether production may be reset: if yes, edit existing migrations; if no, add a data-preserving migration.\n`
+      : `Mulai dari [index](${localLink(file, indexFile)}); baca hanya panduan skill yang relevan. Buka [workflow proyek](${localLink(file, workflowFile)}) sebelum menjalankan pemeriksaan atau mengubah state Git, lalu ikuti instruksi repository yang lebih spesifik. Untuk tugas database, tanyakan apakah production boleh di-fresh: jika boleh, edit migrasi yang ada; jika tidak, tambahkan migrasi yang menjaga data.\n`;
 
-  const selectedGuides = config.skills.map((id) => `- [${id}](${id}.md)`).join('\n');
   documents[indexFile] = {
-    body: `# ${english ? 'Engineering guidelines' : 'Panduan engineering'}\n\n${english ? 'Read these project rules before implementation. Each guide has detailed instructions, checks and examples where relevant.' : 'Baca aturan proyek ini sebelum implementasi. Setiap panduan berisi instruksi terperinci, pemeriksaan, dan contoh bila relevan.'}\n\n${selectedGuides}\n\n- [${english ? 'Project context map' : 'Peta konteks proyek'}](project-context.md)\n- [Workflow](workflow.md)\n`,
+    body:
+      [
+        `# ${english ? 'Engineering guidelines' : 'Panduan engineering'}`,
+        english
+          ? 'Open only the guide relevant to the current task. Project context and workflow are available when needed.'
+          : 'Buka hanya panduan yang relevan dengan tugas. Peta konteks dan workflow tersedia saat diperlukan.',
+        indexGroup(english ? 'Engineering' : 'Engineering', engineeringSkills),
+        indexGroup(english ? 'Application' : 'Aplikasi', applicationSkills),
+        `## ${english ? 'Project' : 'Proyek'}\n\n- [${english ? 'Project context map' : 'Peta konteks proyek'}](project/context.md)\n- [Workflow](project/workflow.md)`,
+      ]
+        .filter(Boolean)
+        .join('\n\n') + '\n',
   };
   documents[contextFile] = { body: projectMap(context, config) };
 
   for (const id of config.skills) {
-    documents[`${config.output}/${id}.md`] = { body: `${guideMarkdown(id, config, context)}\n` };
+    documents[skillGuidePath(config.output, id)] = {
+      body: `${guideMarkdown(id, config, context)}\n`,
+    };
   }
 
   const policy =
     config.validation === 'ask'
       ? english
-        ? 'Ask the user before running tests, lint, typecheck or builds.'
-        : 'Minta izin sebelum menjalankan test, lint, typecheck, atau build.'
+        ? 'Ask before running tests, lint, typecheck, or builds unless the current task explicitly requests those checks.'
+        : 'Minta izin sebelum menjalankan test, lint, typecheck, atau build kecuali pemeriksaan tersebut diminta secara eksplisit dalam tugas.'
       : english
         ? 'Run relevant project checks and report actual results.'
         : 'Jalankan pemeriksaan proyek yang relevan dan laporkan hasil aktual.';
@@ -265,14 +408,25 @@ export function renderDocuments(
     ? 'Follow established repository patterns and verify them in source files. Keep changes within the requested scope. Update the owning documentation when behavior, setup, contracts or operations change. Never claim a command passed unless it was run successfully.'
     : 'Ikuti pola repository yang sudah ada dan verifikasi melalui file source. Batasi perubahan pada scope yang diminta. Perbarui dokumentasi pemilik ketika perilaku, setup, kontrak, atau operasi berubah. Jangan menyatakan command berhasil jika belum dijalankan dengan sukses.';
   const stack = formatStack(config.stack, language, { markdown: true });
-  const detected = formatStack(detection.stack, language, { markdown: true });
+  const detected = formatStack(context.detectedStack, language, { markdown: true });
   const workflowStack = english
     ? `## Selected stack\n\n${stack || 'No stack selected.'}\n\n## Detected evidence\n\n${detected || 'No stack evidence detected.'}`
     : `## Stack pilihan\n\n${stack || 'Belum ada stack dipilih.'}\n\n## Bukti deteksi\n\n${detected || 'Tidak ada bukti stack terdeteksi.'}`;
+  const gitInstructions = gitWorkflow(config.git, language);
   documents[workflowFile] = {
-    body: `# Workflow\n\n${policy}\n\n${workflow}\n\n${workflowStack}\n\nGit: ${config.git}\n\n[${english ? 'Project context map' : 'Peta konteks proyek'}](${localLink(workflowFile, contextFile)})\n`,
+    body: `# Workflow\n\n${policy}\n\n${workflow}\n\n${workflowStack}\n\n## ${english ? 'Git workflow' : 'Workflow Git'}\n\n${gitInstructions}\n\n[${english ? 'Project context map' : 'Peta konteks proyek'}](${localLink(workflowFile, contextFile)})\n`,
   };
-  documents['AGENTS.md'] = { body: pointer('AGENTS.md'), appendable: true };
+  const agentsNeedingAgentsMd = new Set([
+    'codex',
+    'gemini',
+    'cursor',
+    'opencode',
+    'windsurf',
+    'antigravity',
+  ]);
+  if (config.agents.some((agent) => agentsNeedingAgentsMd.has(agent))) {
+    documents['AGENTS.md'] = { body: pointer('AGENTS.md'), appendable: true };
+  }
 
   for (const agent of config.agents) {
     const adapter = adapters[agent];
@@ -288,16 +442,14 @@ export function renderDocuments(
     for (const id of config.skills) {
       const name = `my-skill-gweh-${id}`;
       const file = `${directory}/${name}/SKILL.md`;
-      const description = english
-        ? `Apply ${id} guidance when editing or reviewing this project.`
-        : `Terapkan panduan ${id} saat mengedit atau meninjau proyek ini.`;
+      const description = skillDescriptions[id][language];
       documents[file] = {
         frontmatter: `---\nname: ${name}\ndescription: ${description}\n---\n`,
-        body: `${nativeSkillMarkdown(id, file, config, context)}\n`,
+        body: `${nativeSkillMarkdown(id, file, config)}\n`,
       };
     }
   }
-  assertDistinctPaths(root, [...Object.keys(documents), CONFIG_PATH, MANIFEST_PATH]);
+  assertDistinctPaths(root, [...Object.keys(documents), CONFIG_PATH, MANIFEST_PATH, BASELINE_PATH]);
   return documents;
 }
 

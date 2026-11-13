@@ -6,7 +6,7 @@ import { defaults } from '../dist/config.js';
 import { skillIds } from '../dist/catalog.js';
 import { doctor, isHealthy } from '../dist/doctor.js';
 import { generate } from '../dist/generator.js';
-import { render } from '../dist/render.js';
+import { localLink, projectGuidePath, render, skillGuidePath } from '../dist/render.js';
 import { fixture, writeJson } from './helpers.js';
 
 async function writeFile(root, relative, content) {
@@ -21,22 +21,61 @@ test('every selected skill renders detailed guidance and native agent instructio
   const files = await render(root, config);
 
   for (const skill of config.skills) {
-    const guide = files[`${config.output}/${skill}.md`];
-    const nativeSkill = files[`.agents/skills/my-skill-gweh-${skill}/SKILL.md`];
+    const guide = files[skillGuidePath(config.output, skill)];
+    const nativeSkillFile = `.agents/skills/my-skill-gweh-${skill}/SKILL.md`;
+    const nativeSkill = files[nativeSkillFile];
     assert.ok(guide, `${skill} guide exists`);
     assert.ok(nativeSkill, `${skill} native skill exists`);
     assert.ok((guide.match(/^## /gmu) ?? []).length >= 2, `${skill} has detailed sections`);
     assert.match(guide, /^- /mu, `${skill} has actionable rules`);
-    assert.match(nativeSkill, /^## (Apply this skill|Terapkan skill ini)$/mu);
-    assert.match(nativeSkill, /Read the full guide|Baca panduan lengkap/u);
-    assert.match(nativeSkill, /Project context map|Peta konteks proyek/u);
+    assert.match(nativeSkill, /Follow the project guide:|Ikuti panduan proyek:/u);
+    assert.ok(
+      nativeSkill.includes(`(${localLink(nativeSkillFile, skillGuidePath(config.output, skill))})`),
+    );
+    assert.doesNotMatch(nativeSkill, /Review checklist|Checklist review/u);
   }
 
-  assert.match(files[`${config.output}/README.md`], /project-context\.md/u);
+  const nativeSkills = Object.keys(files).filter((file) =>
+    /\/my-skill-gweh-[^/]+\/SKILL\.md$/u.test(file),
+  );
+  assert.ok(nativeSkills.length > config.skills.length);
+  for (const file of nativeSkills) {
+    const skill = file.match(/\/my-skill-gweh-([^/]+)\/SKILL\.md$/u)?.[1];
+    assert.ok(skill && config.skills.includes(skill));
+    assert.ok(files[file].includes(`(${localLink(file, skillGuidePath(config.output, skill))})`));
+  }
+
+  assert.match(files[`${config.output}/README.md`], /engineering\/quality\.md/u);
+  assert.match(files[`${config.output}/README.md`], /project\/context\.md/u);
   assert.match(
-    files[`${config.output}/zero-any.md`],
+    files[skillGuidePath(config.output, 'zero-any')],
     /no TypeScript files|tidak menemukan berkas TypeScript/u,
   );
+});
+
+test('database migration policy is always available even when contracts is optional', async (t) => {
+  const root = await fixture(t);
+
+  for (const language of ['id', 'en']) {
+    const config = { ...defaults(), docsLanguage: language, skills: ['contracts'] };
+    const files = await render(root, config);
+    const guide = files[skillGuidePath(config.output, 'contracts')];
+    const nativeSkill = files['.agents/skills/my-skill-gweh-contracts/SKILL.md'];
+    const alwaysOn = files['AGENTS.md'];
+
+    assert.match(
+      alwaysOn,
+      /ask whether production may be reset|tanyakan apakah production boleh di-fresh/u,
+    );
+    assert.match(alwaysOn, /edit existing migrations|edit migrasi yang ada/u);
+    assert.match(alwaysOn, /add a data-preserving migration|tambahkan migrasi yang menjaga data/u);
+    assert.doesNotMatch(
+      guide,
+      /ask whether production may be reset|tanyakan apakah production boleh di-fresh/u,
+    );
+    assert.match(nativeSkill, /engineering\/contracts\.md/u);
+    assert.doesNotMatch(nativeSkill, /fresh database reset|database boleh di-fresh/u);
+  }
 });
 
 test('project map uses manifest and path evidence without running scripts or exposing env values', async (t) => {
@@ -65,7 +104,10 @@ test('project map uses manifest and path evidence without running scripts or exp
 
   const config = { ...defaults(), output: 'app/ai-agent-docs', stack: ['laravel'] };
   await generate(root, config);
-  const context = await fs.readFile(path.join(root, config.output, 'project-context.md'), 'utf8');
+  const context = await fs.readFile(
+    path.join(root, projectGuidePath(config.output, 'context')),
+    'utf8',
+  );
 
   assert.match(context, /PHP requirement.*\^8\.3/u);
   assert.match(context, /v13\.17\.2/u);
@@ -99,7 +141,7 @@ test('Go/Gin context is grounded in go.mod and source paths', async (t) => {
   await writeFile(root, 'cmd/server/main.go', 'package main\n');
   await writeFile(root, 'internal/handler/health.go', 'package handler\n');
   const files = await render(root, defaults());
-  const context = files['ai-agent-docs/project-context.md'];
+  const context = files[projectGuidePath('ai-agent-docs', 'context')];
 
   assert.match(context, /Go/u);
   assert.match(context, /Gin/u);
@@ -107,4 +149,157 @@ test('Go/Gin context is grounded in go.mod and source paths', async (t) => {
   assert.match(context, /1\.23/u);
   assert.match(context, /cmd\/server\/main\.go/u);
   assert.match(context, /internal\/handler\/health\.go/u);
+});
+
+test('selected stack stays authoritative while detected evidence remains visible', async (t) => {
+  const root = await fixture(t);
+  await writeFile(
+    root,
+    'go.mod',
+    'module example.com/service\n\ngo 1.23\n\nrequire github.com/gin-gonic/gin v1.10.0\n',
+  );
+  await writeFile(root, 'cmd/server/main.go', 'package main\n');
+  const files = await render(root, {
+    ...defaults(),
+    stack: [],
+    agents: ['codex'],
+    skills: ['routes'],
+  });
+  const context = files[projectGuidePath('ai-agent-docs', 'context')];
+  const workflow = files[projectGuidePath('ai-agent-docs', 'workflow')];
+  assert.match(context, /Selected stack[\s\S]*?No stack evidence found/u);
+  assert.match(context, /Detected stack evidence[\s\S]*?Go[\s\S]*?Gin/u);
+  assert.match(workflow, /No stack selected/u);
+  assert.doesNotMatch(files[skillGuidePath('ai-agent-docs', 'routes')], /Laravel: named route/u);
+});
+
+test('native skills keep all relevant context and examples match the selected stack', async (t) => {
+  const root = await fixture(t);
+  await writeFile(
+    root,
+    'go.mod',
+    'module example.com/service\n\ngo 1.23\n\nrequire github.com/gin-gonic/gin v1.10.0\n',
+  );
+  await writeFile(root, 'cmd/server/main.go', 'package main\n');
+  const files = await render(root, {
+    ...defaults(),
+    agents: ['codex'],
+    skills: ['routes', 'zero-any', 'forms'],
+    stack: ['gin'],
+  });
+  const routesNative = files['.agents/skills/my-skill-gweh-routes/SKILL.md'];
+  const zeroAnyNative = files['.agents/skills/my-skill-gweh-zero-any/SKILL.md'];
+  assert.match(routesNative, /application\/routes\.md/u);
+  assert.match(zeroAnyNative, /engineering\/zero-any\.md/u);
+  assert.doesNotMatch(routesNative, /For Gin|Untuk Gin/u);
+  assert.doesNotMatch(files[skillGuidePath('ai-agent-docs', 'routes')], /Laravel: named route/u);
+  assert.doesNotMatch(
+    files[skillGuidePath('ai-agent-docs', 'forms')],
+    /Blade: field error and CSRF/u,
+  );
+});
+
+test('project commands use the detected package manager and avoid guesses when ambiguous', async (t) => {
+  const root = await fixture(t);
+  await writeJson(root, 'package.json', { scripts: { build: 'vite build' } });
+  await fs.writeFile(path.join(root, 'yarn.lock'), '# yarn');
+  let files = await render(root, { ...defaults(), agents: ['codex'] });
+  let context = files[projectGuidePath('ai-agent-docs', 'context')];
+  assert.match(context, /yarn run build/u);
+  assert.doesNotMatch(context, /npm run build/u);
+
+  await fs.writeFile(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+  files = await render(root, { ...defaults(), agents: ['codex'] });
+  context = files[projectGuidePath('ai-agent-docs', 'context')];
+  assert.match(context, /package manager not identified/u);
+  assert.doesNotMatch(context, /(?:npm|pnpm|yarn|bun) run build/u);
+});
+
+test('script names with spaces are emitted as quoted invocations', async (t) => {
+  const root = await fixture(t);
+  await writeJson(root, 'package.json', { scripts: { 'test ui': 'node tests/ui.js' } });
+  await fs.writeFile(path.join(root, 'package-lock.json'), '{"packages":{}}');
+  const files = await render(root, { ...defaults(), agents: ['codex'], skills: ['quality'] });
+  const context = files[projectGuidePath('ai-agent-docs', 'context')];
+  assert.match(context, /npm run 'test ui'/u);
+});
+
+test('Next.js guidance follows the detected router instead of assuming App Router', async (t) => {
+  const appRoot = await fixture(t);
+  await writeJson(appRoot, 'package.json', { dependencies: { next: '^15.0.0' } });
+  await writeFile(appRoot, 'app/page.tsx', 'export default function Page() { return null; }');
+  const appFiles = await render(appRoot, {
+    ...defaults(),
+    agents: ['codex'],
+    skills: ['quality', 'routes'],
+    stack: ['nextjs'],
+  });
+  assert.match(appFiles[skillGuidePath('ai-agent-docs', 'quality')], /Next.js App Router/u);
+  assert.match(appFiles[projectGuidePath('ai-agent-docs', 'context')], /App Router/u);
+
+  const pagesRoot = await fixture(t);
+  await writeJson(pagesRoot, 'package.json', { dependencies: { next: '^15.0.0' } });
+  await writeFile(pagesRoot, 'pages/index.tsx', 'export default function Page() { return null; }');
+  const pagesFiles = await render(pagesRoot, {
+    ...defaults(),
+    agents: ['codex'],
+    skills: ['quality', 'routes'],
+    stack: ['nextjs'],
+  });
+  assert.match(pagesFiles[skillGuidePath('ai-agent-docs', 'quality')], /Pages Router/u);
+  assert.doesNotMatch(
+    pagesFiles[skillGuidePath('ai-agent-docs', 'quality')],
+    /Server Components as the default/u,
+  );
+});
+
+test('agent compatibility outputs only the necessary instruction entrypoint', async (t) => {
+  const root = await fixture(t);
+  const files = await render(root, { ...defaults(), agents: ['claude'], skills: ['quality'] });
+  assert.ok(files['CLAUDE.md']);
+  assert.equal(files['AGENTS.md'], undefined);
+  assert.ok(files['.claude/skills/my-skill-gweh-quality/SKILL.md']);
+});
+
+test('dependency evidence does not claim a missing Composer lockfile or wrong JS lockfile', async (t) => {
+  const root = await fixture(t);
+  await writeJson(root, 'composer.json', {
+    require: { 'laravel/framework': '^13.0' },
+  });
+  await writeJson(root, 'package.json', {
+    packageManager: 'pnpm@9.0.0',
+    dependencies: { react: '^19.0.0' },
+  });
+  await fs.writeFile(path.join(root, 'package-lock.json'), '{"packages":{}}');
+  await fs.writeFile(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+  const files = await render(root, {
+    ...defaults(),
+    agents: ['codex'],
+    stack: ['laravel', 'react'],
+  });
+  const context = files[projectGuidePath('ai-agent-docs', 'context')];
+  assert.match(context, /Dependency Laravel.*composer\.json`/u);
+  assert.doesNotMatch(context, /Dependency Laravel.*composer\.lock/u);
+  assert.match(context, /Dependency React.*package\.json`/u);
+  assert.doesNotMatch(context, /Dependency React.*package-lock\.json/u);
+  assert.match(context, /declares pnpm, but lockfiles indicate npm/u);
+});
+
+test('malformed optional lockfiles are reported and do not silently erase project facts', async (t) => {
+  const root = await fixture(t);
+  await writeJson(root, 'package.json', {
+    packageManager: 'npm@11.0.0',
+    dependencies: { react: '^19.0.0' },
+  });
+  await fs.writeFile(path.join(root, 'package-lock.json'), '{broken');
+  const files = await render(root, {
+    ...defaults(),
+    agents: ['codex'],
+    skills: ['quality'],
+    stack: ['react'],
+  });
+  const context = files[projectGuidePath('ai-agent-docs', 'context')];
+  assert.match(context, /Invalid JSON in package-lock\.json/u);
+  assert.match(context, /Dependency React/u);
+  assert.match(context, /`npm`/u);
 });

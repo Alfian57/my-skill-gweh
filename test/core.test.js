@@ -26,8 +26,21 @@ test('generated workflow separates languages and explains framework requirements
   const dir = await fixture(t);
   const config = { ...defaults(), stack: ['laravel'] };
   const files = await render(dir, config);
-  assert.match(files[`${config.output}/workflow.md`], /Languages: PHP \(required by Laravel\)/u);
-  assert.match(files[`${config.output}/workflow.md`], /Frameworks: Laravel/u);
+  assert.match(
+    files[`${config.output}/project/workflow.md`],
+    /Languages: PHP \(required by Laravel\)/u,
+  );
+  assert.match(files[`${config.output}/project/workflow.md`], /Frameworks: Laravel/u);
+});
+test('feature PR workflow includes actionable steps and approval boundaries', async (t) => {
+  const dir = await fixture(t);
+  const config = { ...defaults(), git: 'feature-pr' };
+  const files = await render(dir, config);
+  assert.match(files[`${config.output}/project/workflow.md`], /Create a focused feature branch/u);
+  assert.match(
+    files[`${config.output}/project/workflow.md`],
+    /Ask before committing, pushing, or opening a PR/u,
+  );
 });
 test('dry-run, repeatability, edited content preservation', async (t) => {
   const dir = await fixture(t),
@@ -36,12 +49,15 @@ test('dry-run, repeatability, edited content preservation', async (t) => {
   assert.deepEqual(await fs.readdir(dir), []);
   await generate(dir, c);
   assert.equal((await generate(dir, c, true)).changes.length, 0);
-  const f = path.join(dir, c.output, 'quality.md');
+  const f = path.join(dir, c.output, 'engineering', 'quality.md');
   await fs.appendFile(f, 'User note\n');
   await generate(dir, c);
   assert.match(await fs.readFile(f, 'utf8'), /User note/);
   await fs.writeFile(f, (await fs.readFile(f, 'utf8')).replace('Keep modules', 'Edited modules'));
-  assert.ok((await generate(dir, c)).conflicts.includes(c.output + '/quality.md'));
+  const merged = await generate(dir, c);
+  assert.deepEqual(merged.conflicts, []);
+  assert.match(await fs.readFile(f, 'utf8'), /Edited modules/u);
+  assert.match(await fs.readFile(f, 'utf8'), /User note/u);
 });
 test('existing AGENTS content and custom folder remain portable', async (t) => {
   const dir = await fixture(t),

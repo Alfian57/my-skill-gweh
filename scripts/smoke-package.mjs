@@ -53,12 +53,29 @@ try {
   );
   assert.ok(generated.changes.length > 0);
   assert.deepEqual(generated.conflicts, []);
-  assert.deepEqual(JSON.parse(execute(['update', '--non-interactive', '--json'])), {
-    changes: [],
-    conflicts: [],
-  });
+  const updated = JSON.parse(execute(['update', '--non-interactive', '--json']));
+  assert.equal(updated.status, 'applied');
+  assert.deepEqual(updated.changes, []);
+  assert.deepEqual(updated.conflicts, []);
+  assert.deepEqual(updated.planned, { writes: [], removals: [], backups: [], metadata: [] });
+  assert.deepEqual(updated.written, []);
+  assert.deepEqual(updated.removed, []);
+  assert.deepEqual(updated.backups, []);
+  assert.deepEqual(updated.skipped, []);
+  assert.deepEqual(updated.diagnostics, []);
   const report = JSON.parse(execute(['doctor', '--json']));
-  assert.ok(Object.values(report).every((issues) => issues.length === 0));
+  assert.equal(report.state, 'initialized');
+  assert.equal(report.lock.state, 'none');
+  for (const field of [
+    'missing',
+    'conflicts',
+    'drift',
+    'orphaned',
+    'diagnostics',
+    'invalidReferences',
+  ]) {
+    assert.deepEqual(report[field], [], `doctor ${field}`);
+  }
   const skill = await readFile(
     path.join(project, '.agents/skills/my-skill-gweh-quality/SKILL.md'),
     'utf8',
