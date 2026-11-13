@@ -9,7 +9,7 @@ npm ci
 npm run check
 npm test
 npm run package
-npm run test:package -- artifacts/my-skill-gweh-0.1.1.tgz
+npm run test:package -- artifacts/my-skill-gweh-0.1.2.tgz
 ```
 
 Replace the version in the filename after a version bump. `artifacts/` contains the `.tgz` and its `.tgz.sha256` checksum. Generated JavaScript, README, package metadata and the MIT license are included. Source, tests, development scripts and configuration are excluded.
@@ -17,7 +17,7 @@ Replace the version in the filename after a version bump. `artifacts/` contains 
 Install the tarball locally to try the command before npm publication:
 
 ```sh
-npm install -g ./artifacts/my-skill-gweh-0.1.1.tgz
+npm install -g ./artifacts/my-skill-gweh-0.1.2.tgz
 my-skill-gweh --version
 ```
 

@@ -92,7 +92,7 @@ npm ci
 npm run check
 npm test
 npm run package
-npm run test:package -- artifacts/my-skill-gweh-0.1.1.tgz
+npm run test:package -- artifacts/my-skill-gweh-0.1.2.tgz
 ```
 
 `npm run format` applies Prettier. `check` verifies formatting and strict TypeScript types. Tests use isolated temporary projects and user configuration paths. CI checks Linux, macOS and Windows on Node.js 22 and 24.
