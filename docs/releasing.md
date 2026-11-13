@@ -9,7 +9,7 @@ npm ci
 npm run check
 npm test
 npm run package
-npm run test:package -- artifacts/my-skill-gweh-0.1.0.tgz
+npm run test:package -- artifacts/my-skill-gweh-0.1.1.tgz
 ```
 
 Replace the version in the filename after a version bump. `artifacts/` contains the `.tgz` and its `.tgz.sha256` checksum. Generated JavaScript, README, package metadata and the MIT license are included. Source, tests, development scripts and configuration are excluded.
@@ -17,7 +17,7 @@ Replace the version in the filename after a version bump. `artifacts/` contains 
 Install the tarball locally to try the command before npm publication:
 
 ```sh
-npm install -g ./artifacts/my-skill-gweh-0.1.0.tgz
+npm install -g ./artifacts/my-skill-gweh-0.1.1.tgz
 my-skill-gweh --version
 ```
 
@@ -29,7 +29,7 @@ Both workflows use GitHub-hosted runners. CI runs on pushes and pull requests, a
 
 ## One-time npm bootstrap
 
-A new package must exist before its Trusted Publisher can be configured. The initial `0.1.0` package is therefore published interactively by its maintainer:
+A new package must exist before its Trusted Publisher can be configured. The initial `0.1.1` package is therefore published interactively by its maintainer:
 
 ```sh
 npm login --registry=https://registry.npmjs.org/
@@ -39,7 +39,7 @@ npm publish --access public
 
 Run these commands from the prepared source checkout. `prepublishOnly` runs format/type checks and tests; `prepack` performs a clean build. Complete any browser authentication or 2FA challenge on your machine. Credentials do not belong in this repository or a chat message.
 
-The initial manual publication does not carry GitHub Actions provenance. Subsequent OIDC releases carry provenance. A subsequent `v0.1.0` workflow run verifies the published tarball integrity and skips publication only if the archive is identical. npm versions cannot be overwritten.
+The initial manual publication does not carry GitHub Actions provenance. Subsequent OIDC releases carry provenance. A subsequent `v0.1.1` workflow run verifies the published tarball integrity and skips publication only if the archive is identical. npm versions cannot be overwritten.
 
 ## Configure Trusted Publishing
 
@@ -66,9 +66,9 @@ Start from the intended release commit with a clean Git working tree and configu
 # and creates the version commit and Git tag. It does not push.
 npm run release:patch
 
-# For the first automated release after the manual 0.1.0 bootstrap:
+# For the first automated release after the manual 0.1.1 bootstrap:
 git push origin main
-git push origin v0.1.1
+git push origin v0.1.2
 ```
 
 Use `release:minor` or `release:major` for other semantic version changes. Substitute the actual resulting tag in the push command. Pushing the tag starts publication; simply committing or pushing a branch does not publish to npm.
@@ -96,7 +96,7 @@ For prereleases, inspect or install `my-skill-gweh@next`. Registry propagation c
 Fix authentication or publisher settings and rerun the failed workflow. Manual dispatch also works when explicitly targeting the existing release tag:
 
 ```sh
-gh workflow run publish.yml --ref v0.1.1
+gh workflow run publish.yml --ref v0.1.2
 ```
 
 Dispatch from a branch is rejected by the release guard. If a version has already reached npm, an identical tarball is verified and publication is skipped; a different tarball fails explicitly. Do not overwrite published versions or move Git tags. Prepare a new version for code changes. A failure before the publish step does not publish anything; uploaded artifacts alone are not a release.

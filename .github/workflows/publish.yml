@@ -83,4 +83,4 @@ jobs:
         env:
           TARBALL: ${{ steps.package.outputs.tarball }}
           DIST_TAG: ${{ needs.release-info.outputs.dist-tag }}
-        run: npm publish "$TARBALL" --access public --provenance --ignore-scripts --tag "$DIST_TAG"
+        run: npm publish "./$TARBALL" --access public --provenance --ignore-scripts --tag "$DIST_TAG"
