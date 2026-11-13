@@ -2,7 +2,6 @@ import path from 'node:path';
 import { type Config } from './config.js';
 import { assertSafePath, readOptional } from './filesystem.js';
 import { planGeneration } from './generator.js';
-import { renderDocuments } from './render.js';
 import { errorMessage } from './errors.js';
 
 export interface DoctorReport {
@@ -20,7 +19,7 @@ export async function doctor(root: string, config: Config): Promise<DoctorReport
     drift: plan.changes.map(({ file }) => file),
     invalidReferences: [],
   };
-  for (const file of Object.keys(renderDocuments(plan.root, config))) {
+  for (const file of plan.files) {
     const content = await readOptional(await assertSafePath(plan.root, file));
     if (content === undefined) {
       report.missing.push(file);

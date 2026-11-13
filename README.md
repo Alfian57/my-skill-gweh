@@ -10,7 +10,7 @@ my-skill-gweh init
 npx my-skill-gweh init
 ```
 
-Run the wizard inside the application directory. It detects manifest dependencies, shows declared project scripts without executing them, and lets you review the stack and select rules. CLI and documentation languages can be chosen independently: Indonesian or English.
+Run the wizard inside the application directory. It detects source languages and manifest dependencies, shows declared project scripts without executing them, and lets you review the stack with grouped checkboxes. CLI and documentation languages can be chosen independently: Indonesian or English.
 
 ## Commands
 
@@ -54,9 +54,15 @@ my-skill-gweh update ./application --non-interactive --json
 
 The `output` folder is relative to the project and uses `/` separators on all platforms. Traversal and reserved metadata directories are rejected. Folder names containing spaces, Unicode, `#`, or parentheses are supported, with encoded Markdown references.
 
+## Stack detection and selection
+
+The interactive stack picker groups checkboxes into programming languages, frameworks, and libraries/integrations. Each choice includes a short description. Selecting Laravel also includes PHP, Gin includes Go, and Next.js or the Inertia React adapter includes React. The generated workflow lists each category and explains required technologies.
+
+Languages are detected from source file extensions: JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`), TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`), PHP (`.php`), and Go (`.go`). A `package.json` indicates the JavaScript package ecosystem, not that the project contains JavaScript source; a TypeScript dependency alone does not mark TypeScript as a source language. Frameworks and libraries are detected from their manifests. Source scanning skips `.git`, `node_modules`, `vendor`, `dist`, `build`, `.next`, and `coverage`, and does not follow symlinks.
+
 ## Generated files and updates
 
-Documentation defaults to `ai-agent-docs`. The generator creates engineering rules and workflow guidance, not inferred business roles or application architecture.
+Documentation defaults to `ai-agent-docs`. Each selected skill produces a detailed guide with actionable rules, review checks and relevant examples. The generator also writes `project-context.md` from recognized manifests, source extensions and a bounded sample of repository paths. It records declared command names without copying script bodies or running them, and it does not infer business behavior or application architecture.
 
 | Agent          | Project instructions              | Native skills      |
 | -------------- | --------------------------------- | ------------------ |
@@ -100,7 +106,7 @@ npm run test:package -- artifacts/my-skill-gweh-0.1.2.tgz
 Source responsibilities:
 
 - `src/cli/`: argument validation, command orchestration, output and injectable wizard I/O.
-- Configuration, catalog, detection and rendering modules: validated choices and deterministic document content.
+- Configuration, catalog, guides, detection, project context and rendering modules: validated choices and deterministic, evidence-backed document content.
 - Managed-content, generator, filesystem and transaction modules: ownership, preview planning and protected writes.
 - Doctor and preset modules: diagnostics and saved user choices.
 - `src/core.ts`: compatibility exports for the original module entrypoint.

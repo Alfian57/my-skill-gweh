@@ -2,6 +2,8 @@ import { CONFIG_PATH, MANIFEST_PATH, parseConfig, type Config } from './config.j
 import { assertSafePath, projectRoot, readOptional, safe } from './filesystem.js';
 import { isRecord } from './errors.js';
 import { renderDocuments } from './render.js';
+import { collectProjectContext } from './project-context.js';
+import { detect } from './detection.js';
 import { replaceManagedContent } from './managed-content.js';
 import { applyChanges, LOCK_PATH, type FileChange } from './transaction.js';
 
@@ -12,6 +14,7 @@ export interface GenerationResult {
 
 export interface GenerationPlan {
   root: string;
+  files: string[];
   changes: FileChange[];
   metadata: FileChange[];
   conflicts: string[];
@@ -42,7 +45,9 @@ export async function planGeneration(root: string, input: Config): Promise<Gener
   const base = await projectRoot(root);
   if (config.output.split('/')[0] === LOCK_PATH)
     throw new Error('Output conflicts with the generation lock.');
-  const documents = renderDocuments(base, config);
+  const detection = await detect(base);
+  const context = await collectProjectContext(base, config, detection);
+  const documents = renderDocuments(base, config, detection, context);
   const previous = await loadManifest(base);
   const manifest = { ...previous };
   const changes: FileChange[] = [];
@@ -70,7 +75,7 @@ export async function planGeneration(root: string, input: Config): Promise<Gener
     const content = JSON.stringify(value, null, 2) + '\n';
     if (original !== content) metadata.push({ file, original, content });
   }
-  return { root: base, changes, metadata, conflicts };
+  return { root: base, files: Object.keys(documents), changes, metadata, conflicts };
 }
 
 export async function commitGeneration(plan: GenerationPlan): Promise<GenerationResult> {

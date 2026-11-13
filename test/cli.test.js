@@ -96,34 +96,95 @@ test('presets round-trip validated configuration and never overwrite an existing
 test('wizard cancellation is an explicit result rather than process.exit inside library code', async () => {
   const io = { intro() {}, select: async () => Symbol('cancel') };
   await assert.rejects(
-    configure(defaults(), { stack: [], evidence: [], commands: {} }, io),
+    configure(
+      defaults(),
+      { stack: [], evidence: [], commands: {}, ecosystems: [], sourceEvidence: [] },
+      io,
+    ),
     CancelledError,
   );
 });
 
 test('wizard preserves existing choices and can configure Indonesian documentation', async () => {
-  const initial = { ...defaults(), stack: ['go'], validation: 'auto', git: 'staging' };
+  const initial = {
+    ...defaults(),
+    stack: ['go', 'custom-stack'],
+    validation: 'auto',
+    git: 'staging',
+  };
   const selects = ['id', 'id', 'auto', 'staging'];
-  const text = ['custom docs', 'go,gin'];
+  const text = ['custom docs'];
+  const notes = [];
+  let stackOptions;
   const io = {
     intro() {},
-    note() {},
+    note(message) {
+      notes.push(message);
+    },
     select: async (options) => {
       if (options.message === 'Kebijakan pengujian') assert.equal(options.initialValue, 'auto');
       return selects.shift();
     },
     text: async () => text.shift(),
     multiselect: async (options) => options.initialValues,
+    groupMultiselect: async (options) => {
+      stackOptions = options;
+      assert.deepEqual(options.initialValues, ['go', 'gin', 'custom-stack']);
+      return options.initialValues;
+    },
   };
   const configured = await configure(
     initial,
-    { stack: ['go'], evidence: ['go.mod'], commands: {} },
+    {
+      stack: ['gin'],
+      evidence: ['go.mod'],
+      commands: {},
+      ecosystems: ['go-modules'],
+      sourceEvidence: [],
+    },
     io,
   );
-  assert.deepEqual(configured.stack, ['go', 'gin']);
+  assert.deepEqual(configured.stack, ['go', 'gin', 'custom-stack']);
+  assert.deepEqual(Object.keys(stackOptions.options), [
+    'Bahasa pemrograman',
+    'Framework',
+    'Library dan integrasi',
+    'Stack khusus dari konfigurasi',
+  ]);
+  assert.ok(stackOptions.options.Framework.some((option) => option.value === 'laravel'));
+  assert.ok(
+    stackOptions.options['Stack khusus dari konfigurasi'].some(
+      (option) => option.value === 'custom-stack',
+    ),
+  );
+  assert.match(notes[0], /Gin/);
+  assert.doesNotMatch(notes[0], /^\s*\{/u);
   assert.equal(configured.docsLanguage, 'id');
   assert.equal(configured.validation, 'auto');
-  assert.deepEqual(initial.stack, ['go']);
+  assert.deepEqual(initial.stack, ['go', 'custom-stack']);
+});
+
+test('selecting Laravel automatically includes PHP and explains the relationship', async () => {
+  const selects = ['id', 'id', 'ask', 'existing'];
+  const notes = [];
+  const io = {
+    intro() {},
+    note(message) {
+      notes.push(message);
+    },
+    select: async () => selects.shift(),
+    text: async () => 'ai-agent-docs',
+    groupMultiselect: async () => ['laravel'],
+    multiselect: async (options) => options.initialValues,
+  };
+  const configured = await configure(
+    defaults(),
+    { stack: [], evidence: [], commands: {}, ecosystems: [], sourceEvidence: [] },
+    io,
+  );
+
+  assert.deepEqual(configured.stack, ['php', 'laravel']);
+  assert.match(notes[1], /PHP \(diperlukan oleh Laravel\)/u);
 });
 
 test('declining final confirmation leaves the project untouched', async (t) => {

@@ -3,11 +3,98 @@ import { agents, rules, skillIds, type Language } from '../catalog.js';
 import { validateOutput, parseConfig, type Config } from '../config.js';
 import { CancelledError, errorMessage } from '../errors.js';
 import type { Detection } from '../detection.js';
+import {
+  formatStack,
+  resolveStack,
+  stackCatalog,
+  type StackCategory,
+  type StackTechnology,
+} from '../stack.js';
 
 export type Prompts = Pick<
   typeof prompts,
-  'intro' | 'select' | 'text' | 'multiselect' | 'note' | 'confirm'
+  'intro' | 'select' | 'text' | 'multiselect' | 'groupMultiselect' | 'note' | 'confirm'
 >;
+
+const stackGroups: Record<Language, Record<StackCategory, string>> = {
+  id: { language: 'Bahasa pemrograman', framework: 'Framework', library: 'Library dan integrasi' },
+  en: {
+    language: 'Programming languages',
+    framework: 'Frameworks',
+    library: 'Libraries and integrations',
+  },
+};
+
+const ecosystemLabels: Record<Language, Record<string, string>> = {
+  id: {
+    'javascript-packages': 'Ekosistem JavaScript (package.json)',
+    composer: 'Ekosistem PHP (Composer)',
+    'go-modules': 'Modul Go (go.mod)',
+  },
+  en: {
+    'javascript-packages': 'JavaScript ecosystem (package.json)',
+    composer: 'PHP ecosystem (Composer)',
+    'go-modules': 'Go modules (go.mod)',
+  },
+};
+
+function detectedSummary(detection: Detection, language: Language): string {
+  const english = language === 'en';
+  const stack = formatStack(detection.stack, language);
+  const lines = [
+    stack ||
+      (english
+        ? 'No supported language or framework detected.'
+        : 'Bahasa atau framework yang didukung belum terdeteksi.'),
+  ];
+  if (detection.ecosystems.length) {
+    lines.push(
+      `${english ? 'Ecosystems' : 'Ekosistem'}: ${detection.ecosystems
+        .map((value) => ecosystemLabels[language][value] ?? value)
+        .join(', ')}`,
+    );
+  }
+  if (detection.sourceEvidence.length) {
+    lines.push(
+      `${english ? 'Source file extensions' : 'Ekstensi source'}: ${detection.sourceEvidence.join(', ')}`,
+    );
+  }
+  if (detection.evidence.length) {
+    lines.push(`${english ? 'Manifest files' : 'File manifest'}: ${detection.evidence.join(', ')}`);
+  }
+  const commands = Object.entries(detection.commands).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (commands.length) {
+    lines.push(
+      `${english ? 'Declared project scripts' : 'Script proyek yang terdaftar'}: ${commands
+        .map(([name, command]) => `${name}: ${command}`)
+        .join('; ')}`,
+    );
+  }
+  return lines.join('\n');
+}
+
+function stackOptions(language: Language, current: readonly string[]) {
+  const options: Record<string, { value: string; label: string; hint: string }[]> = {};
+  for (const technology of Object.keys(stackCatalog) as StackTechnology[]) {
+    const entry = stackCatalog[technology];
+    const group = stackGroups[language][entry.category];
+    (options[group] ??= []).push({
+      value: technology,
+      label: entry.label[language],
+      hint: entry.description[language],
+    });
+  }
+
+  const custom = [...new Set(current)].filter((value) => !Object.hasOwn(stackCatalog, value));
+  if (custom.length) {
+    options[
+      language === 'id' ? 'Stack khusus dari konfigurasi' : 'Custom values from configuration'
+    ] = custom.map((value) => ({ value, label: value, hint: '' }));
+  }
+  return options;
+}
 
 function answer<T>(value: T | symbol): Exclude<T, symbol> {
   if (typeof value === 'symbol') throw new CancelledError();
@@ -57,19 +144,27 @@ export async function configure(
       initialValue: config.docsLanguage,
     }),
   );
-  io.note(JSON.stringify(detection, null, 2), english ? 'Detected project' : 'Hasil deteksi');
-  config.stack = answer(
-    await io.text({
-      message: english
-        ? 'Stack (comma separated; edit detection)'
-        : 'Stack (pisahkan koma; hasil deteksi bisa diubah)',
-      defaultValue: config.stack.join(','),
-      placeholder: detection.stack.join(',') || 'typescript,react,nextjs',
+  io.note(
+    detectedSummary(detection, config.language),
+    english ? 'Detected project' : 'Hasil deteksi',
+  );
+  const initialStack = [...new Set([...config.stack, ...detection.stack])];
+  const selectedStack = answer(
+    await io.groupMultiselect({
+      message: english ? 'Select project technologies' : 'Pilih teknologi proyek',
+      options: stackOptions(config.language, initialStack),
+      initialValues: resolveStack(initialStack).values,
+      required: false,
+      selectableGroups: false,
+      groupSpacing: 1,
     }),
-  )
-    .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean);
+  );
+  config.stack = resolveStack(selectedStack).values;
+  io.note(
+    formatStack(config.stack, config.language) ||
+      (english ? 'No stack selected.' : 'Belum ada stack yang dipilih.'),
+    english ? 'Selected stack' : 'Stack terpilih',
+  );
   config.agents = answer(
     await io.multiselect({
       message: english ? 'Target agents' : 'Agent yang digunakan',

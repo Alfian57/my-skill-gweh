@@ -18,7 +18,16 @@ test('mixed stack detection never executes project scripts', async (t) => {
       scripts: { test: 'false' },
     }),
   );
-  assert.deepEqual((await detect(dir)).stack, ['javascript', 'typescript', 'react', 'nextjs']);
+  await fs.writeFile(path.join(dir, 'app.tsx'), 'export const App = () => null;');
+  assert.deepEqual((await detect(dir)).stack, ['typescript', 'nextjs', 'react']);
+});
+
+test('generated workflow separates languages and explains framework requirements', async (t) => {
+  const dir = await fixture(t);
+  const config = { ...defaults(), stack: ['laravel'] };
+  const files = await render(dir, config);
+  assert.match(files[`${config.output}/workflow.md`], /Languages: PHP \(required by Laravel\)/u);
+  assert.match(files[`${config.output}/workflow.md`], /Frameworks: Laravel/u);
 });
 test('dry-run, repeatability, edited content preservation', async (t) => {
   const dir = await fixture(t),

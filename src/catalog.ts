@@ -39,16 +39,16 @@ export const rules = {
     id: 'Gunakan unknown dan narrowing, bukan any atau penonaktifan pemeriksaan tipe TypeScript.',
   },
   routes: {
-    en: 'Reuse centralized route definitions for navigation and API calls.',
-    id: 'Gunakan definisi rute terpusat untuk navigasi dan panggilan API.',
+    en: 'Use the project’s established route helpers and keep URL behavior at its owning boundary.',
+    id: 'Gunakan helper rute proyek dan jaga perilaku URL pada boundary pemiliknya.',
   },
   forms: {
-    en: 'Provide clear required/optional labels and loading, empty, error and large-data states.',
-    id: 'Sediakan label wajib/opsional serta kondisi loading, kosong, error, dan data besar.',
+    en: 'Provide clear field labels, server-backed validation, and visible submission and error states.',
+    id: 'Sediakan label field yang jelas, validasi server, serta status submit dan error yang terlihat.',
   },
   'ui-tests': {
-    en: 'Maintain a colocated behavior test for each changed UI component.',
-    id: 'Pelihara test perilaku yang terlokasi bersama setiap komponen UI yang diubah.',
+    en: 'Test changed UI behavior with the project’s existing runner and meaningful user-facing assertions.',
+    id: 'Uji perilaku UI yang berubah dengan runner proyek dan assertion yang bermakna bagi pengguna.',
   },
   accessibility: {
     en: 'Verify keyboard navigation, visible focus and accessible control labels.',
