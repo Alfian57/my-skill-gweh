@@ -1,0 +1,64 @@
+{
+  "name": "my-skill-gweh",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Project-aware bilingual engineering skills generator",
+  "bin": {
+    "my-skill-gweh": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test test/*.test.js",
+    "prepack": "npm run build",
+    "check": "npm run format:check && tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "package": "node scripts/package.mjs",
+    "test:package": "node scripts/smoke-package.mjs",
+    "prepublishOnly": "npm run check && npm test",
+    "preversion": "npm run check && npm test",
+    "release:patch": "npm version patch",
+    "release:minor": "npm version minor",
+    "release:major": "npm version major",
+    "version": "prettier --write package.json"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "3.10.1",
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alfian57/my-skill-gweh.git"
+  },
+  "homepage": "https://github.com/Alfian57/my-skill-gweh#readme",
+  "bugs": {
+    "url": "https://github.com/Alfian57/my-skill-gweh/issues"
+  },
+  "author": "Alfian57",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "cli",
+    "agent-skills",
+    "codex",
+    "claude",
+    "gemini",
+    "cursor",
+    "opencode"
+  ]
+}

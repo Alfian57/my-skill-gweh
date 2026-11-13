@@ -1,0 +1,33 @@
+/** Keep all release-policy decisions in a pure function that can be tested offline. */
+export function releaseInfo(metadata, { tag, refType, repository }) {
+  const version = metadata.version;
+  if (
+    typeof version !== 'string' ||
+    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u.test(
+      version,
+    )
+  ) {
+    throw new Error('Release requires a semantic package version without build metadata.');
+  }
+  const prerelease = version.split('-').slice(1).join('-');
+  if (prerelease.split('.').some((part) => /^0\d+$/u.test(part))) {
+    throw new Error('Numeric prerelease identifiers must not contain leading zeroes.');
+  }
+  if (refType !== 'tag' || tag !== `v${version}`) {
+    throw new Error(`Release must run from the exact tag v${version}.`);
+  }
+  const expectedRepository = `git+https://github.com/${repository}.git`;
+  if (!repository || metadata.repository?.url !== expectedRepository) {
+    throw new Error(`package.json repository.url must match ${expectedRepository}.`);
+  }
+  if (
+    metadata.name !== 'my-skill-gweh' ||
+    metadata.publishConfig?.access !== 'public' ||
+    metadata.publishConfig?.registry !== 'https://registry.npmjs.org/'
+  ) {
+    throw new Error(
+      'Release package name, access or registry does not match the npm publication configuration.',
+    );
+  }
+  return { version, distTag: version.includes('-') ? 'next' : 'latest' };
+}
