@@ -58,10 +58,10 @@ Prerelease versions use the `next` npm dist-tag. The workflow builds one tarball
 
 ## Recovering a failed publication
 
-First resolve the cause, such as an npm Trusted Publisher mismatch or registry outage. Rerun the failed workflow run when possible. To retry the already-created tag manually, dispatch `publish.yml` with that tag as the ref:
+First resolve the cause, such as an npm Trusted Publisher mismatch or registry outage. For code or validation fixes, dispatch `publish.yml` from `main` and pass the existing Release Please tag. The workflow validates using its current guard and loads package metadata and release contents from the selected tag:
 
 ```sh
-gh workflow run publish.yml --repo Alfian57/my-skill-gweh --ref v0.1.6
+gh workflow run publish.yml --repo Alfian57/my-skill-gweh --ref main -f release_tag=my-skill-gweh-v0.2.0
 ```
 
-The retry validates the tag against `package.json`, reruns CI, and applies the same exact-tarball check. A branch ref is rejected. Never move a published tag, bump a version with `npm version`, or run `npm publish` locally.
+The retry validates the tag against the package metadata at that tag, reruns CI, and applies the same exact-tarball check. A branch ref or mismatched tag is rejected. Never move a release tag, bump a version with `npm version`, or run `npm publish` locally.
