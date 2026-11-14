@@ -1,9 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: ['**']
   pull_request:
+    branches: [main]
   workflow_call:
 
 permissions:
@@ -14,6 +13,20 @@ defaults:
     shell: bash
 
 jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check
   test:
     name: Node ${{ matrix.node }} / ${{ matrix.os }}
     timeout-minutes: 15
@@ -32,5 +45,39 @@ jobs:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
       - run: npm ci
-      - name: Verify source and installed package
-        run: npm run verify
+      - run: npm test
+  package_smoke:
+    name: Installable package smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - name: Build package tarball
+        id: package
+        run: npm run package
+      - name: Install and smoke-test the tarball
+        env:
+          TARBALL: ${{ steps.package.outputs.tarball }}
+        run: npm run test:package -- "$TARBALL"
+  gate:
+    name: CI gate
+    if: always()
+    needs: [static, test, package_smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all CI jobs to pass
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PACKAGE_RESULT: ${{ needs.package_smoke.result }}
+        run: |
+          test "$STATIC_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$PACKAGE_RESULT" = success

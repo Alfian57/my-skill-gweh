@@ -24,12 +24,7 @@
     "package": "node scripts/package.mjs",
     "test:package": "node scripts/smoke-package.mjs",
     "verify": "node scripts/verify.mjs",
-    "prepublishOnly": "npm run verify",
-    "preversion": "npm run verify",
-    "release:patch": "npm version patch",
-    "release:minor": "npm version minor",
-    "release:major": "npm version major",
-    "version": "prettier --write package.json"
+    "prepublishOnly": "npm run verify"
   },
   "dependencies": {
     "@clack/prompts": "^1.9.0",
