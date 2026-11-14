@@ -5,11 +5,56 @@ import { releaseInfo } from '../scripts/release-info.mjs';
 import { verifyPublishedVersion } from '../scripts/verify-publication.mjs';
 
 const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const releaseConfig = JSON.parse(
+  await readFile(new URL('../.release-please-config.json', import.meta.url), 'utf8'),
+);
+const releaseManifest = JSON.parse(
+  await readFile(new URL('../.release-please-manifest.json', import.meta.url), 'utf8'),
+);
 const source = {
   tag: `v${metadata.version}`,
   refType: 'tag',
   repository: 'Alfian57/my-skill-gweh',
 };
+
+test('Release Please configuration matches the package and current manifest baseline', () => {
+  assert.equal(releaseConfig['release-type'], 'node');
+  assert.equal(releaseConfig.packages['.']['package-name'], metadata.name);
+  assert.equal(releaseManifest['.'], metadata.version);
+});
+
+test('local npm version and release scripts are removed', () => {
+  assert.equal(
+    Object.keys(metadata.scripts).some((script) => script.startsWith('release:')),
+    false,
+  );
+  assert.equal(metadata.scripts.preversion, undefined);
+  assert.equal(metadata.scripts.version, undefined);
+});
+
+test('release workflow runs on main pushes and manual recovery, not tag pushes', async () => {
+  const workflow = (
+    await readFile(new URL('../.github/workflows/publish.yml', import.meta.url), 'utf8')
+  ).replace(/\r\n/gu, '\n');
+  assert.match(workflow, /push:\n\s+branches: \[main\]/u);
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.doesNotMatch(workflow, /tags:\s*\['v\*'\]/u);
+  assert.match(workflow, /actions\/create-github-app-token@/u);
+  assert.match(workflow, /googleapis\/release-please-action@/u);
+  assert.match(workflow, /Check Release Please App configuration/u);
+  assert.match(workflow, /RELEASE_PLEASE_APP_PRIVATE_KEY/u);
+  assert.match(workflow, /npm publish .*--provenance/u);
+});
+
+test('CI exposes a required gate for pull requests and reusable recovery checks', async () => {
+  const workflow = (
+    await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  ).replace(/\r\n/gu, '\n');
+  assert.match(workflow, /pull_request:\n\s+branches: \[main\]/u);
+  assert.match(workflow, /workflow_call:/u);
+  assert.match(workflow, /name: CI gate/u);
+  assert.match(workflow, /name: Installable package smoke test/u);
+});
 
 test('stable release uses latest only for the exact configured repository and version tag', () => {
   assert.deepEqual(releaseInfo(metadata, source), { version: metadata.version, distTag: 'latest' });

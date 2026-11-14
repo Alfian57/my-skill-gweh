@@ -129,9 +129,9 @@ Source responsibilities:
 
 `npm run package` produces an installable tarball and SHA-256 checksum in `artifacts/`. Each build removes the previous `dist/` directory so deleted source modules cannot remain in a release. `npm run test:package -- path/to/package.tgz` installs that exact tarball in a temporary directory and exercises the CLI without source files or devDependencies.
 
-The npm CD workflow runs on version tags (`v0.1.1`, for example). It validates the version and repository, reuses the six-platform CI checks, tests the release tarball, uploads it with its checksum, and publishes it through npm Trusted Publishing (OIDC). Stable versions use `latest`; prereleases use `next`.
+Releases use Release Please to open a version and changelog PR after conventional commits reach `main`. Merging that PR creates the GitHub Release and starts `.github/workflows/publish.yml`, which validates and smoke-tests the exact npm tarball before publishing it through Trusted Publishing (OIDC). Stable versions use `latest`; prereleases use `next`.
 
-See [the release guide](docs/releasing.md) for initial npm setup, Trusted Publisher settings and subsequent releases. The workflow does not need an `NPM_TOKEN` secret.
+See [the release guide](docs/releasing.md) for the one-time GitHub App, branch protection and npm Trusted Publisher setup, plus the release and recovery steps. No `NPM_TOKEN` is needed, and release versions/tags are not created locally.
 
 ## Current limitations
 

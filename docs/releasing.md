@@ -1,103 +1,67 @@
-# Building and releasing My Skill Gweh
+# Release workflow
 
-The package is `my-skill-gweh`, sourced from `https://github.com/Alfian57/my-skill-gweh`. The configured workflow is `.github/workflows/publish.yml`. This document describes preparation; running local build commands does not publish anything.
-
-## Build a package locally
-
-```sh
-npm ci
-npm run check
-npm test
-npm run package
-npm run test:package -- artifacts/my-skill-gweh-0.1.2.tgz
-```
-
-Replace the version in the filename after a version bump. `artifacts/` contains the `.tgz` and its `.tgz.sha256` checksum. Generated JavaScript, README, package metadata and the MIT license are included. Source, tests, development scripts and configuration are excluded.
-
-Install the tarball locally to try the command before npm publication:
-
-```sh
-npm install -g ./artifacts/my-skill-gweh-0.1.2.tgz
-my-skill-gweh --version
-```
+This repository publishes `my-skill-gweh` from GitHub Actions. Release Please determines the next version from conventional commits, updates `package.json`, `package-lock.json` and `CHANGELOG.md` in a release PR, and creates the GitHub Release after that PR is merged. The workflow then publishes the verified tarball to npm with OIDC provenance.
 
 ## One-time GitHub setup
 
-Create the public GitHub repository `Alfian57/my-skill-gweh` and push this source, including `package-lock.json` and `.github/workflows/`. The repository URL must match `package.json` exactly for provenance. If this directory is not a Git repository yet, initialize it and review the files intended for the first commit before pushing.
+Create one GitHub App for Release Please and install it on this repository (the same App can serve other package repositories). Grant these repository permissions:
 
-Both workflows use GitHub-hosted runners. CI runs on pushes and pull requests, and is also reusable by the publication workflow. The publication workflow requires all six combinations of Node.js 22/24 and Linux/macOS/Windows to pass.
+| Permission    | Access         |
+| ------------- | -------------- |
+| Contents      | Read and write |
+| Issues        | Read and write |
+| Pull requests | Read and write |
 
-## One-time npm bootstrap
+In this repository's **Settings → Secrets and variables → Actions**, add:
 
-A new package must exist before its Trusted Publisher can be configured. The initial `0.1.1` package is therefore published interactively by its maintainer:
+| Kind     | Name                             | Value                        |
+| -------- | -------------------------------- | ---------------------------- |
+| Variable | `RELEASE_PLEASE_APP_ID`          | The GitHub App ID            |
+| Secret   | `RELEASE_PLEASE_APP_PRIVATE_KEY` | The private key for that App |
 
-```sh
-npm login --registry=https://registry.npmjs.org/
-npm whoami --registry=https://registry.npmjs.org/
-npm publish --access public
-```
+The App token is used so that a Release Please PR triggers normal CI. Do not put its private key in the repository or a prompt.
 
-Run these commands from the prepared source checkout. `prepublishOnly` runs format/type checks and tests; `prepack` performs a clean build. Complete any browser authentication or 2FA challenge on your machine. Credentials do not belong in this repository or a chat message.
+Add these settings separately to every repository using the App; the App ID and private key can be reused. Protect `main` so changes must come through a pull request and require the GitHub Actions check **CI gate**. Allow **squash and merge only**, use the pull request title as the squash commit title, and enable automatic deletion of merged branches. Conventional pull request titles then remain visible to Release Please. Do not require an approval count that would prevent the sole maintainer from merging. The workflow is ready to publish only after the App is installed and both Actions values exist in this repository.
 
-The initial manual publication does not carry GitHub Actions provenance. Subsequent OIDC releases carry provenance. A subsequent `v0.1.1` workflow run verifies the published tarball integrity and skips publication only if the archive is identical. npm versions cannot be overwritten.
+## One-time npm setup
 
-## Configure Trusted Publishing
+In npm package settings, configure a GitHub Actions Trusted Publisher:
 
-In the npm package settings, add a GitHub Actions Trusted Publisher with these exact values:
+| Setting              | Value                      |
+| -------------------- | -------------------------- |
+| Organization or user | `Alfian57`                 |
+| Repository           | `my-skill-gweh`            |
+| Workflow filename    | `publish.yml`              |
+| Environment          | Leave empty                |
+| Publishing mode      | Allow direct `npm publish` |
 
-| Setting              | Value                                                  |
-| -------------------- | ------------------------------------------------------ |
-| Organization or user | `Alfian57`                                             |
-| Repository           | `my-skill-gweh`                                        |
-| Workflow filename    | `publish.yml`                                          |
-| Environment name     | Leave empty; this workflow does not set an environment |
-| Allowed actions      | Enable direct `npm publish`                            |
+The workflow uses Node.js 24, npm 11.16.0 and `id-token: write`. Do not add an `NPM_TOKEN`; npm credentials are provided through OIDC. Keep the workflow filename `publish.yml` aligned with this Trusted Publisher configuration.
 
-No `NPM_TOKEN` secret is required. The publishing job uses Node.js 24, npm 11.16.0 and `id-token: write`. npm requires Node.js 22.14+ and npm 11.5.1+ for OIDC. New publisher configurations may permit staged publishing by default; explicitly allow direct publishing because this workflow uses `npm publish`.
+## Releasing a change
 
-References: [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/), [npm trust prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/), [npm provenance](https://docs.npmjs.com/generating-provenance-statements/).
+1. Make changes on a feature branch and use [Conventional Commits](https://www.conventionalcommits.org/), for example `fix: handle empty project config` or `feat: add mascot skill`.
+2. Open a pull request to `main`. The required **CI gate** runs static checks, the Node 22/24 Linux, macOS and Windows test matrix, and an installable tarball smoke test.
+3. Merge the change after CI passes. A push to `main` runs Release Please, which opens or updates the release PR when the commit history contains releasable changes.
+4. Review the version bump and generated changelog in the release PR. Its **CI gate** must pass before merging.
+5. Merge the release PR. Release Please creates the version tag and GitHub Release; the same main-branch workflow validates the release and publishes the package.
+6. Confirm the `Release and publish npm package` run succeeds and npm has the expected version:
 
-## Subsequent releases
+   ```sh
+   npm view my-skill-gweh version
+   npm install -g my-skill-gweh@latest
+   my-skill-gweh --version
+   ```
 
-Start from the intended release commit with a clean Git working tree and configured maintainer identity:
+After confirming a feature PR is merged, update local `main` with `git pull --ff-only`. Check the worktree is clean and compare the local feature branch's commit with the merged PR's `headRefOid` before removing that local branch. Squash commits do not preserve feature-branch ancestry, so a verified merged branch may require `git branch -D`. GitHub deletes its remote branch automatically through the repository setting.
 
-```sh
-# Validates the current source, bumps package.json/package-lock.json,
-# and creates the version commit and Git tag. It does not push.
-npm run release:patch
+Prerelease versions use the `next` npm dist-tag. The workflow builds one tarball, smoke-tests that archive, publishes those exact bytes, and checks the registry's SHA-512 integrity. An existing npm version is skipped only when its tarball is identical; a mismatch fails rather than overwriting the immutable version.
 
-# For the first automated release after the manual 0.1.1 bootstrap:
-git push origin main
-git push origin v0.1.2
-```
+## Recovering a failed publication
 
-Use `release:minor` or `release:major` for other semantic version changes. Substitute the actual resulting tag in the push command. Pushing the tag starts publication; simply committing or pushing a branch does not publish to npm.
-
-The workflow:
-
-1. Requires a tag exactly matching `v` plus the package version, and verifies the configured source repository.
-2. Runs the reusable CI matrix, including an installed-tarball smoke test.
-3. Builds and installs the release tarball in the publishing job, then verifies `--version`, `init`, idempotent `update`, `doctor`, and native skill frontmatter.
-4. Uploads the tested tarball and checksum as a workflow artifact for 30 days.
-5. Publishes that exact tarball with OIDC and provenance, without rebuilding during publication. Stable versions use `latest`; prerelease versions such as `0.2.0-beta.1` use `next`.
-6. Polls the npm registry for up to five minutes and verifies that the published version exposes the same integrity digest as the tested tarball. Temporary registry propagation errors are retried; a digest mismatch or non-retryable registry error fails the workflow.
-
-After the workflow succeeds, confirm the publication and install it locally:
+First resolve the cause, such as an npm Trusted Publisher mismatch or registry outage. Rerun the failed workflow run when possible. To retry the already-created tag manually, dispatch `publish.yml` with that tag as the ref:
 
 ```sh
-npm view my-skill-gweh version
-npm install -g my-skill-gweh@latest
-my-skill-gweh --version
+gh workflow run publish.yml --repo Alfian57/my-skill-gweh --ref v0.1.6
 ```
 
-For prereleases, inspect or install `my-skill-gweh@next`. Registry propagation can lag behind a successful publication.
-
-## Retrying a failed release
-
-Fix authentication or publisher settings and rerun the failed workflow. Manual dispatch also works when explicitly targeting the existing release tag:
-
-```sh
-gh workflow run publish.yml --ref v0.1.2
-```
-
-Dispatch from a branch is rejected by the release guard. If a version has already reached npm, an identical tarball is verified and publication is skipped; a different tarball fails explicitly. Do not overwrite published versions or move Git tags. Prepare a new version for code changes. A failure before the publish step does not publish anything; uploaded artifacts alone are not a release.
+The retry validates the tag against `package.json`, reruns CI, and applies the same exact-tarball check. A branch ref is rejected. Never move a published tag, bump a version with `npm version`, or run `npm publish` locally.

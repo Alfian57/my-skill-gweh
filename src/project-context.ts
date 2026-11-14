@@ -50,6 +50,8 @@ export interface ProjectContext {
   packageManagerConflict?: string;
   ecosystems: string[];
   sourceEvidence: string[];
+  releasePleaseEvidence?: string[];
+  dockerEvidence?: string[];
   facts: ProjectFact[];
   commands: DeclaredCommand[];
   areas: ProjectArea[];
@@ -255,6 +257,71 @@ async function collectPaths(
   return found;
 }
 
+async function collectReleaseAndDockerEvidence(
+  root: string,
+  output: string,
+  budget: ScanBudget,
+): Promise<{ releasePlease: string[]; docker: string[] }> {
+  const releasePlease = new Set<string>();
+  const docker = new Set<string>();
+  const releaseConfigs = [
+    '.release-please-config.json',
+    'release-please-config.json',
+    '.release-please-manifest.json',
+  ];
+  for (const file of releaseConfigs) {
+    if ((await readProjectInput(root, file, budget.diagnostics)) !== undefined)
+      releasePlease.add(file);
+  }
+
+  const workflows = (await exists(root, '.github/workflows'))
+    ? await collectPaths(root, '.github/workflows', 60, output, budget)
+    : [];
+  for (const file of workflows) {
+    if (!/\.ya?ml$/iu.test(file)) continue;
+    const content = await readProjectInput(root, file, budget.diagnostics);
+    if (content === undefined) continue;
+    if (/uses\s*:\s*googleapis\/release-please-action@/iu.test(content)) releasePlease.add(file);
+    if (
+      /uses\s*:\s*docker\/(?:build-push-action|buildx-action)@/iu.test(content) ||
+      /(?:^|\s)docker\s+(?:build|buildx\s+build)\b/imu.test(content)
+    ) {
+      docker.add(file);
+    }
+  }
+
+  const rootEntries = await readBoundedDirectory(root, budget);
+  for (const entry of rootEntries) {
+    if (!entry.isFile()) continue;
+    if (/^Dockerfile(?:\..+)?$/u.test(entry.name)) docker.add(entry.name);
+    if (
+      entry.name === '.dockerignore' ||
+      /^(?:docker-compose|compose)\.(?:yaml|yml)$/u.test(entry.name)
+    ) {
+      docker.add(entry.name);
+    }
+  }
+
+  if (await exists(root, 'docker')) {
+    const dockerFiles = await collectPaths(root, 'docker', 60, output, budget);
+    for (const file of dockerFiles) {
+      const basename = path.posix.basename(file);
+      if (
+        /^Dockerfile(?:\..+)?$/u.test(basename) ||
+        basename === '.dockerignore' ||
+        /^(?:docker-compose|compose)\.(?:yaml|yml)$/u.test(basename)
+      ) {
+        docker.add(file);
+      }
+    }
+  }
+
+  return {
+    releasePlease: [...releasePlease].sort(),
+    docker: [...docker].sort(),
+  };
+}
+
 async function collectAreas(
   root: string,
   output: string,
@@ -442,6 +509,7 @@ export async function collectProjectContext(
     addFact(facts, { id: 'Versi Go', en: 'Go version' }, goVersion, 'go.mod');
   }
 
+  const releaseEvidence = await collectReleaseAndDockerEvidence(root, config.output, budget);
   const guidance = await collectGuidance(root, config.output, budget);
   return {
     ...(projectName ? { name: projectName } : {}),
@@ -455,6 +523,8 @@ export async function collectProjectContext(
       : {}),
     ecosystems: detection.ecosystems,
     sourceEvidence: detection.sourceEvidence,
+    releasePleaseEvidence: releaseEvidence.releasePlease,
+    dockerEvidence: releaseEvidence.docker,
     facts,
     commands,
     areas: await collectAreas(root, config.output, budget),

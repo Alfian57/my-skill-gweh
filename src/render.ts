@@ -83,7 +83,10 @@ export function skillGuidePath(output: string, skill: Skill): string {
   return `${output}/${skillGroups[skill]}/${skill}.md`;
 }
 
-export function projectGuidePath(output: string, guide: 'context' | 'workflow'): string {
+export function projectGuidePath(
+  output: string,
+  guide: 'context' | 'workflow' | 'release',
+): string {
   return `${output}/project/${guide}.md`;
 }
 
@@ -367,6 +370,37 @@ function gitWorkflow(policy: Config['git'], language: Language): string {
     : 'Buat feature branch terfokus dari staging. Setelah review, minta izin sebelum commit atau push ke staging kecuali diminta. Jalankan pemeriksaan yang disepakati, lalu minta izin terpisah sebelum mempromosikan staging ke main kecuali tugas meminta promosi. Jangan merge atau push ke main tanpa persetujuan eksplisit.';
 }
 
+function releaseGuideMarkdown(context: ProjectContext, language: Language): string {
+  const english = language === 'en';
+  const releaseEvidence = context.releasePleaseEvidence ?? [];
+  const dockerEvidence = context.dockerEvidence ?? [];
+  const lines = [
+    `# ${english ? 'Release workflow' : 'Workflow release'}`,
+    english
+      ? `Release Please evidence: ${releaseEvidence.map(code).join(', ')}.`
+      : `Bukti Release Please: ${releaseEvidence.map(code).join(', ')}.`,
+    english
+      ? 'Use a Conventional Commit pull request title. Squash merge should preserve that title because Release Please reads commit messages to determine the next version. Review its generated version and changelog; do not bump package versions or create release tags manually.'
+      : 'Gunakan judul pull request Conventional Commit. Squash merge harus mempertahankan judul tersebut karena Release Please membaca pesan commit untuk menentukan versi berikutnya. Tinjau versi dan changelog yang dibuat; jangan menaikkan versi package atau membuat tag release secara manual.',
+    english
+      ? 'Merge the release PR only after its required CI checks pass. Release Please then creates the version tag and GitHub Release; follow the detected workflow for subsequent publishing and verify the published artifact.'
+      : 'Merge PR release hanya setelah pemeriksaan CI wajib lulus. Release Please kemudian membuat tag versi dan GitHub Release; ikuti workflow yang terdeteksi untuk publikasi selanjutnya dan verifikasi artefak yang terbit.',
+    english
+      ? 'Protect `main`: work through a pull request and do not push directly to it. After a PR is confirmed merged, check that the worktree is clean and the local branch points to the PR head before deleting it. Squash does not preserve branch ancestry, so use `git branch -D` only after those checks. Confirm the remote branch is deleted by the repository setting.'
+      : 'Lindungi `main`: kerjakan melalui pull request dan jangan push langsung ke sana. Setelah PR dipastikan merged, periksa worktree bersih dan branch lokal menunjuk ke head PR sebelum menghapusnya. Squash tidak mempertahankan ancestry branch, jadi gunakan `git branch -D` hanya setelah pemeriksaan tersebut. Pastikan branch remote terhapus melalui pengaturan repository.',
+  ];
+
+  if (dockerEvidence.length) {
+    lines.push(
+      english
+        ? `Docker evidence: ${dockerEvidence.map(code).join(', ')}. Follow this repository's existing image build and registry workflow; do not guess a registry or introduce another publishing path. Build from the verified release tag, publish immutable version and commit-SHA tags, and update 'latest' only for stable releases when the existing policy does so.`
+        : `Bukti Docker: ${dockerEvidence.map(code).join(', ')}. Ikuti workflow build image dan registry yang sudah ada; jangan menebak registry atau menambah jalur publikasi lain. Build dari tag release yang sudah diverifikasi, terbitkan tag versi dan commit-SHA yang immutable, dan perbarui latest hanya untuk release stabil jika kebijakan yang ada melakukannya.`,
+    );
+  }
+
+  return lines.join('\n\n');
+}
+
 /** Check all file/directory collisions before any output can be written. */
 export function renderDocuments(
   root: string,
@@ -382,6 +416,8 @@ export function renderDocuments(
   const indexFile = `${config.output}/README.md`;
   const contextFile = projectGuidePath(config.output, 'context');
   const workflowFile = projectGuidePath(config.output, 'workflow');
+  const releaseFile = projectGuidePath(config.output, 'release');
+  const hasReleasePlease = Boolean(context.releasePleaseEvidence?.length);
   const engineeringSkills = (Object.keys(skillGroups) as Skill[]).filter(
     (skill) => skillGroups[skill] === 'engineering' && config.skills.includes(skill),
   );
@@ -406,12 +442,15 @@ export function renderDocuments(
           : 'Buka hanya panduan yang relevan dengan tugas. Peta konteks dan workflow tersedia saat diperlukan.',
         indexGroup(english ? 'Engineering' : 'Engineering', engineeringSkills),
         indexGroup(english ? 'Application' : 'Aplikasi', applicationSkills),
-        `## ${english ? 'Project' : 'Proyek'}\n\n- [${english ? 'Project context map' : 'Peta konteks proyek'}](project/context.md)\n- [Workflow](project/workflow.md)`,
+        `## ${english ? 'Project' : 'Proyek'}\n\n- [${english ? 'Project context map' : 'Peta konteks proyek'}](project/context.md)\n- [Workflow](project/workflow.md)${hasReleasePlease ? `\n- [${english ? 'Release workflow' : 'Workflow release'}](project/release.md)` : ''}`,
       ]
         .filter(Boolean)
         .join('\n\n') + '\n',
   };
   documents[contextFile] = { body: projectMap(context, config) };
+  if (hasReleasePlease) {
+    documents[releaseFile] = { body: `${releaseGuideMarkdown(context, language)}\n` };
+  }
 
   for (const id of config.skills) {
     documents[skillGuidePath(config.output, id)] = {
@@ -441,8 +480,11 @@ export function renderDocuments(
     ? `## Selected stack\n\n${stack || 'No stack selected.'}\n\n## Detected evidence\n\n${detected || 'No stack evidence detected.'}`
     : `## Stack pilihan\n\n${stack || 'Belum ada stack dipilih.'}\n\n## Bukti deteksi\n\n${detected || 'Tidak ada bukti stack terdeteksi.'}`;
   const gitInstructions = gitWorkflow(config.git, language);
+  const releaseLink = hasReleasePlease
+    ? `\n\n[${english ? 'Release workflow guide' : 'Panduan workflow release'}](${localLink(workflowFile, releaseFile)})`
+    : '';
   documents[workflowFile] = {
-    body: `# Workflow\n\n${policy}\n\n${workflow}\n\n${workflowStack}\n\n## ${english ? 'Git workflow' : 'Workflow Git'}\n\n${gitInstructions}\n\n[${english ? 'Project context map' : 'Peta konteks proyek'}](${localLink(workflowFile, contextFile)})\n`,
+    body: `# Workflow\n\n${policy}\n\n${workflow}\n\n${workflowStack}\n\n## ${english ? 'Git workflow' : 'Workflow Git'}\n\n${gitInstructions}\n\n[${english ? 'Project context map' : 'Peta konteks proyek'}](${localLink(workflowFile, contextFile)})${releaseLink}\n`,
   };
   const agentsNeedingAgentsMd = new Set([
     'codex',
