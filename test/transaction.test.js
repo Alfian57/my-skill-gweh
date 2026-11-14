@@ -107,3 +107,53 @@ test('rollback restores a deleted file when a later write fails', async (t) => {
   );
   assert.deepEqual(await snapshot(root), before);
 });
+
+test('a developer edit made immediately before a later write is preserved and earlier writes roll back', async (t) => {
+  const root = await fixture(t);
+  await fs.writeFile(path.join(root, 'first.md'), 'first base');
+  await fs.writeFile(path.join(root, 'second.md'), 'second base');
+
+  await assert.rejects(
+    applyChanges(
+      root,
+      [
+        { file: 'first.md', original: 'first base', content: 'first generated' },
+        { file: 'second.md', original: 'second base', content: 'second generated' },
+      ],
+      async (file) => {
+        if (file === 'second.md') await fs.writeFile(path.join(root, file), 'new developer edit');
+      },
+    ),
+    /File changed since preview: second\.md/u,
+  );
+  assert.equal(await fs.readFile(path.join(root, 'first.md'), 'utf8'), 'first base');
+  assert.equal(await fs.readFile(path.join(root, 'second.md'), 'utf8'), 'new developer edit');
+});
+
+test('rollback does not overwrite a developer edit made after an earlier transaction write', async (t) => {
+  const root = await fixture(t);
+  await fs.writeFile(path.join(root, 'first.md'), 'first base');
+  await fs.writeFile(path.join(root, 'second.md'), 'second base');
+
+  await assert.rejects(
+    applyChanges(
+      root,
+      [
+        { file: 'first.md', original: 'first base', content: 'first generated' },
+        { file: 'second.md', original: 'second base', content: 'second generated' },
+      ],
+      async (file) => {
+        if (file === 'second.md') {
+          await fs.writeFile(path.join(root, 'first.md'), 'concurrent developer edit');
+          throw new Error('stop transaction');
+        }
+      },
+    ),
+    (error) =>
+      error instanceof AggregateError &&
+      error.message.includes('rollback was incomplete') &&
+      error.errors.some((item) => String(item).includes('Rollback skipped')),
+  );
+  assert.equal(await fs.readFile(path.join(root, 'first.md'), 'utf8'), 'concurrent developer edit');
+  assert.equal(await fs.readFile(path.join(root, 'second.md'), 'utf8'), 'second base');
+});

@@ -1,5 +1,12 @@
 import path from 'node:path';
-import { agents, rules, type Agent, type Language, type Skill } from './catalog.js';
+import {
+  agents,
+  rules,
+  SKILL_CATALOG_REVISION,
+  type Agent,
+  type Language,
+  type Skill,
+} from './catalog.js';
 import { isRecord } from './errors.js';
 import { readJson } from './filesystem.js';
 
@@ -18,6 +25,7 @@ export interface Config {
   validation: 'ask' | 'auto';
   git: 'existing' | 'feature-pr' | 'staging';
   stack: string[];
+  skillCatalogRevision?: number;
 }
 
 export function defaults(): Config {
@@ -31,6 +39,7 @@ export function defaults(): Config {
     validation: 'ask',
     git: 'existing',
     stack: [],
+    skillCatalogRevision: SKILL_CATALOG_REVISION,
   };
 }
 
@@ -102,6 +111,16 @@ export function validate(value: unknown): asserts value is Config {
   }
   stringList(value.stack, 'stack', true);
   if (
+    value.skillCatalogRevision !== undefined &&
+    (!Number.isSafeInteger(value.skillCatalogRevision) ||
+      (value.skillCatalogRevision as number) < 0 ||
+      (value.skillCatalogRevision as number) > SKILL_CATALOG_REVISION)
+  ) {
+    throw new Error(
+      `Configuration skillCatalogRevision must be an integer from 0 to ${SKILL_CATALOG_REVISION}.`,
+    );
+  }
+  if (
     value.customSkills !== undefined &&
     (!Array.isArray(value.customSkills) || value.customSkills.length > 0)
   ) {
@@ -121,6 +140,9 @@ export function parseConfig(value: unknown): Config {
     validation: value.validation,
     git: value.git,
     stack: [...value.stack],
+    ...(typeof value.skillCatalogRevision === 'number'
+      ? { skillCatalogRevision: value.skillCatalogRevision }
+      : {}),
   };
 }
 

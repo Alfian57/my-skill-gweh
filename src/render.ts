@@ -2,7 +2,13 @@ import path from 'node:path';
 import { rules, type Agent, type Language, type Skill } from './catalog.js';
 import { validate, BASELINE_PATH, CONFIG_PATH, MANIFEST_PATH, type Config } from './config.js';
 import { safe } from './filesystem.js';
-import { contextualGuideSections, guides, localized, type GuideSection } from './guides.js';
+import {
+  contextualGuideSections,
+  guides,
+  localized,
+  mascotConceptSections,
+  type GuideSection,
+} from './guides.js';
 import { collectProjectContext, type ProjectContext } from './project-context.js';
 import { detect, type Detection } from './detection.js';
 import { formatStack } from './stack.js';
@@ -19,6 +25,7 @@ const skillGroups: Record<Skill, 'engineering' | 'application'> = {
   'ui-size': 'application',
   'ui-tests': 'application',
   accessibility: 'application',
+  mascot: 'application',
 };
 
 const skillDescriptions: Record<Skill, Record<Language, string>> = {
@@ -61,6 +68,10 @@ const skillDescriptions: Record<Skill, Record<Language, string>> = {
   accessibility: {
     en: 'Use when changing controls, keyboard flow, focus behavior, or accessible names.',
     id: 'Gunakan saat mengubah kontrol, alur keyboard, focus, atau nama aksesibel.',
+  },
+  mascot: {
+    en: 'Use when a developer asks to design a project mascot or create consistent mascot image variations.',
+    id: 'Gunakan saat developer meminta desain maskot proyek atau variasi gambar maskot yang konsisten.',
   },
   dependencies: {
     en: 'Use when adding, updating, or removing project dependencies.',
@@ -172,6 +183,18 @@ function guideMarkdown(skill: Skill, config: Config, context: ProjectContext): s
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+function mascotConceptMarkdown(language: Language): string {
+  const intro =
+    language === 'en'
+      ? 'Read this workflow only when creating a new mascot identity or explicitly redesigning one.'
+      : 'Baca alur ini hanya saat membuat identitas maskot baru atau melakukan redesign yang diminta.';
+  return [
+    `# ${language === 'en' ? 'Mascot concept workflow' : 'Alur konsep maskot'}`,
+    intro,
+    ...mascotConceptSections.map((section) => sectionMarkdown(section, language)),
+  ].join('\n\n');
 }
 
 function nativeSkillMarkdown(skill: Skill, file: string, config: Config): string {
@@ -377,7 +400,7 @@ export function renderDocuments(
   documents[indexFile] = {
     body:
       [
-        `# ${english ? 'Engineering guidelines' : 'Panduan engineering'}`,
+        `# ${english ? 'Project guidelines' : 'Panduan proyek'}`,
         english
           ? 'Open only the guide relevant to the current task. Project context and workflow are available when needed.'
           : 'Buka hanya panduan yang relevan dengan tugas. Peta konteks dan workflow tersedia saat diperlukan.',
@@ -393,6 +416,11 @@ export function renderDocuments(
   for (const id of config.skills) {
     documents[skillGuidePath(config.output, id)] = {
       body: `${guideMarkdown(id, config, context)}\n`,
+    };
+  }
+  if (config.skills.includes('mascot')) {
+    documents[`${config.output}/application/mascot-concepts.md`] = {
+      body: `${mascotConceptMarkdown(config.docsLanguage)}\n`,
     };
   }
 

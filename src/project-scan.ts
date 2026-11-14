@@ -1,11 +1,51 @@
 import { promises as fs } from 'node:fs';
 import type { Dirent } from 'node:fs';
-import { assertSafePath } from './filesystem.js';
+import { assertSafePath, safe } from './filesystem.js';
 import { isFileError } from './errors.js';
 
 export const PROJECT_SCAN_ENTRY_LIMIT = 20_000;
 export const PROJECT_SCAN_DEPTH_LIMIT = 64;
 export const PROJECT_INPUT_SIZE_LIMIT = 32 * 1024 * 1024;
+
+export const IGNORED_PROJECT_DIRECTORIES = new Set([
+  '.git',
+  '.my-skill-gweh',
+  'node_modules',
+  'vendor',
+  'storage',
+  'dist',
+  'build',
+  '.next',
+  'coverage',
+  '.turbo',
+  '.cache',
+  '.output',
+  '.svelte-kit',
+  '.vercel',
+  'out',
+  'target',
+]);
+
+export function isIgnoredProjectDirectory(name: string): boolean {
+  return IGNORED_PROJECT_DIRECTORIES.has(name.toLowerCase());
+}
+
+/** Nested repositories and initialized child projects belong to their own generator run. */
+export async function hasNestedProjectBoundary(root: string, relative: string): Promise<boolean> {
+  if (!relative) return false;
+  for (const marker of ['.git', '.my-skill-gweh/config.json']) {
+    try {
+      await fs.lstat(safe(root, `${relative}/${marker}`));
+      return true;
+    } catch (error) {
+      if (!isFileError(error, 'ENOENT')) {
+        if (error instanceof Error && error.message.includes('symlink')) return true;
+        throw error;
+      }
+    }
+  }
+  return false;
+}
 
 export interface ScanBudget {
   visited: number;

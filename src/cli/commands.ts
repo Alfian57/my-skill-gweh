@@ -1,11 +1,23 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as prompts from '@clack/prompts';
-import { agents, catalog } from '../catalog.js';
-import { CONFIG_PATH, defaults, loadConfig } from '../config.js';
+import {
+  agents,
+  catalog,
+  skillIds,
+  skillsIntroducedAfter,
+  SKILL_CATALOG_REVISION,
+} from '../catalog.js';
+import { CONFIG_PATH, defaults, loadConfig, type Config } from '../config.js';
 import { detect } from '../detection.js';
 import { doctor, isHealthy } from '../doctor.js';
 import { assertSafePath, projectRoot, readOptional } from '../filesystem.js';
-import { commitGeneration, planGeneration, previewGeneration } from '../generator.js';
+import {
+  commitGeneration,
+  planGeneration,
+  previewGeneration,
+  type GenerationConflict,
+} from '../generator.js';
 import { fingerprint } from '../managed-content.js';
 import { listPresets, presetDirectory, removePreset, savePreset, showPreset } from '../presets.js';
 import { unifiedDiff } from './diff.js';
@@ -26,6 +38,7 @@ export interface Context {
   version: string;
   interactive: boolean;
   write: Write;
+  warn?: Write;
   presets: string;
   prompts?: Prompts;
   spinner?: () => { start(message: string): void; stop(message?: string): void };
@@ -37,6 +50,7 @@ export function defaultContext(version: string): Context {
     version,
     interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     write: (text) => console.log(text),
+    warn: (text) => console.error(text),
     presets: presetDirectory(),
     spinner: prompts.spinner,
   };
@@ -46,8 +60,10 @@ async function withProgress<T>(
   context: Context,
   message: string,
   action: () => Promise<T>,
+  completed: string,
+  quiet = false,
 ): Promise<T> {
-  if (!context.interactive || !context.spinner) return action();
+  if (quiet || !context.interactive || !context.spinner) return action();
   const spinner = context.spinner();
   let visible = false;
   const timer = setTimeout(() => {
@@ -58,32 +74,76 @@ async function withProgress<T>(
     return await action();
   } finally {
     clearTimeout(timer);
-    if (visible) spinner.stop();
+    if (visible) spinner.stop(completed);
   }
 }
 
-function conflictReason(reason: string, language: 'id' | 'en'): string {
-  if (language === 'en') return reason;
-  if (reason.includes('nested project'))
-    return 'Path ini berada di dalam nested project; generator parent tidak akan menghapus atau mengambil alih file tersebut.';
-  if (reason.includes('developer notes'))
-    return `File berisi catatan developer, tetapi skill tujuan tidak dipilih: ${reason.split(': ').at(-1) ?? ''}`;
-  if (reason.startsWith('Managed ownership could not be verified'))
-    return 'Kepemilikan file terkelola tidak dapat diverifikasi; konten mungkin diedit atau dibuat oleh versi lama.';
-  if (reason.startsWith('The destination already contains unowned content'))
-    return 'Tujuan sudah berisi konten yang tidak dikelola generator.';
-  if (reason.startsWith('This generated output is no longer selected'))
-    return 'Output ini tidak lagi dipilih, tetapi kontennya berubah sejak dibuat.';
-  if (reason.startsWith('A managed marker was found'))
-    return 'Marker generator ditemukan tanpa catatan kepemilikan yang dapat diverifikasi.';
-  return reason;
+function conflictReason(conflict: GenerationConflict, language: 'id' | 'en'): string {
+  const messages: Record<GenerationConflict['reasonCode'], [string, string]> = {
+    unowned: [
+      'The destination already contains content not managed by the generator.',
+      'Tujuan sudah berisi konten yang tidak dikelola generator.',
+    ],
+    ownership: [
+      'Managed ownership could not be verified; inspect the existing content.',
+      'Kepemilikan file terkelola tidak dapat diverifikasi; periksa konten yang ada.',
+    ],
+    overlap: [
+      'Developer edits overlap generated changes; resolve the sections individually.',
+      'Edit developer bertumpuk dengan perubahan generator; selesaikan tiap bagian.',
+    ],
+    'work-limit': [
+      'The file is too large for a safe automatic comparison.',
+      'File terlalu besar untuk dibandingkan secara otomatis dengan aman.',
+    ],
+    'modified-removal': [
+      'This customized output is no longer selected; choose retain or delete after backup.',
+      'Output yang diedit tidak lagi dipilih; pilih simpan atau hapus setelah backup.',
+    ],
+    'nested-project': [
+      'Run the CLI from the nested child project root.',
+      'Jalankan CLI dari root child project tersebut.',
+    ],
+    'developer-notes': [
+      'This file contains developer notes, but its destination guide is not selected.',
+      'File ini berisi catatan developer, tetapi panduan tujuannya tidak dipilih.',
+    ],
+  };
+  return messages[conflict.reasonCode][language === 'en' ? 0 : 1];
 }
 
-async function runProject(options: ProjectOptions, context: Context): Promise<number> {
+function notifyUnreviewedSkills(config: Config, options: ProjectOptions, context: Context): void {
+  if (options.command !== 'update' || options.reconfigure || options.config) return;
+  const revision = config.skillCatalogRevision ?? 0;
+  const unseen = skillsIntroducedAfter(revision).filter((skill) => !config.skills.includes(skill));
+  if (!unseen.length) return;
+  const labels = unseen.map(
+    (skill) => `${skill} (${catalog[skill]?.[config.language === 'en' ? 0 : 1] ?? skill})`,
+  );
+  const firstUnseen = unseen[0]!;
+  const text =
+    config.language === 'en'
+      ? `New optional skill${unseen.length === 1 ? '' : 's'} available: ${labels.join(', ')}. Enable with \`my-skill-gweh skill enable ${firstUnseen}\` or review all choices with \`my-skill-gweh update --reconfigure\`.`
+      : `Skill opsional baru tersedia: ${labels.join(', ')}. Aktifkan dengan \`my-skill-gweh skill enable ${firstUnseen}\` atau tinjau semua pilihan dengan \`my-skill-gweh update --reconfigure\`.`;
+  if (options.json) context.warn?.(text);
+  else context.write(text);
+}
+
+async function runProject(
+  options: ProjectOptions,
+  context: Context,
+  configOverride?: Config,
+): Promise<number> {
   const root = await projectRoot(path.resolve(context.cwd, options.target));
   if (options.command === 'doctor') {
+    let language: 'id' | 'en' = 'id';
+    try {
+      language = (await loadConfig(await assertSafePath(root, CONFIG_PATH))).language;
+    } catch {
+      // Doctor reports invalid configuration itself; keep its output readable in Indonesian.
+    }
     const result = await doctor(root);
-    report(result, options.json, context.write);
+    report(result, options.json, context.write, language);
     return isHealthy(result) ? 0 : 1;
   }
 
@@ -103,6 +163,10 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
   // update must start from an initialized project even when --config is supplied.
   let config = options.command === 'init' ? defaults() : await loadConfig(configFile);
   if (options.config) config = await loadConfig(path.resolve(context.cwd, options.config));
+  if (configOverride) config = configOverride;
+  if (options.command === 'init' || options.config)
+    config.skillCatalogRevision = SKILL_CATALOG_REVISION;
+  notifyUnreviewedSkills(config, options, context);
 
   let wizardDetection: Awaited<ReturnType<typeof detect>> | undefined;
   if (!options.nonInteractive && (options.command === 'init' || options.reconfigure)) {
@@ -110,6 +174,8 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
       context,
       config.language === 'en' ? 'Scanning project' : 'Memindai project',
       () => detect(root),
+      config.language === 'en' ? 'Done' : 'Selesai',
+      options.json,
     );
     wizardDetection = detection;
     const freshInteractiveInit = options.command === 'init' && !options.config;
@@ -129,6 +195,8 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
     context,
     config.language === 'en' ? 'Preparing generated files' : 'Menyiapkan file hasil generate',
     () => planGeneration(root, config, {}, wizardDetection),
+    config.language === 'en' ? 'Done' : 'Selesai',
+    options.json,
   );
   if (plan.recovered.length) {
     if (!options.json)
@@ -146,7 +214,7 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
     while (plan.conflicts.length && rounds < 5) {
       if (plan.conflictDetails.some(({ kind }) => kind === 'nested')) {
         for (const conflict of plan.conflictDetails)
-          context.write(`${conflict.file}: ${conflictReason(conflict.reason, config.language)}`);
+          context.write(`${conflict.file}: ${conflictReason(conflict, config.language)}`);
         report(previewGeneration(plan), options.json, context.write, config.language);
         return 1;
       }
@@ -163,8 +231,22 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
         })),
       );
       for (const conflict of plan.conflictDetails) {
-        context.write(`${conflict.file}: ${conflictReason(conflict.reason, config.language)}`);
+        context.write(`${conflict.file}: ${conflictReason(conflict, config.language)}`);
         if (conflict.merge) {
+          const saved = hunks[conflict.file];
+          if (
+            !saved ||
+            saved.baseFingerprint !== conflict.merge.baseFingerprint ||
+            saved.localFingerprint !== conflict.merge.localFingerprint ||
+            saved.generatedFingerprint !== conflict.merge.generatedFingerprint
+          ) {
+            hunks[conflict.file] = {
+              baseFingerprint: conflict.merge.baseFingerprint,
+              localFingerprint: conflict.merge.localFingerprint,
+              generatedFingerprint: conflict.merge.generatedFingerprint,
+              choices: {},
+            };
+          }
           for (const [index, hunk] of conflict.merge.hunks.entries()) {
             context.write(
               config.language === 'en'
@@ -197,12 +279,6 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
               break;
             }
             finalPreview.set(conflict.file, conflict.file);
-            hunks[conflict.file] ??= {
-              baseFingerprint: conflict.merge.baseFingerprint,
-              localFingerprint: conflict.merge.localFingerprint,
-              generatedFingerprint: conflict.merge.generatedFingerprint,
-              choices: {},
-            };
             hunks[conflict.file]!.choices[hunk.id] = choice;
           }
           continue;
@@ -242,6 +318,8 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
         context,
         config.language === 'en' ? 'Refreshing the plan' : 'Memperbarui rencana',
         () => planGeneration(root, config, { resolutions, hunks }),
+        config.language === 'en' ? 'Done' : 'Selesai',
+        options.json,
       );
       rounds += 1;
       const nextSignature = JSON.stringify(
@@ -261,7 +339,9 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
   }
   const preview = previewGeneration(plan);
   if (options.dryRun || plan.conflicts.length) {
-    report(preview, options.json, context.write, config.language);
+    report(preview, options.json, context.write, config.language, {
+      ...(options.dryRun ? { previewKind: 'dry-run' as const } : {}),
+    });
     return plan.conflicts.length ? 1 : 0;
   }
   if (!options.nonInteractive) {
@@ -272,7 +352,7 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
       report(result, options.json, context.write, config.language);
       return 0;
     }
-    report(preview, false, context.write, config.language);
+    report(preview, false, context.write, config.language, { previewKind: 'confirmation' });
     for (const destination of new Set(finalPreview.values())) {
       const change = plan.changes.find((item) => item.file === destination);
       const removal = plan.removals.find((item) => item.file === destination);
@@ -294,9 +374,53 @@ async function runProject(options: ProjectOptions, context: Context): Promise<nu
     context,
     config.language === 'en' ? 'Writing project guidance' : 'Menulis panduan project',
     () => commitGeneration(plan),
+    config.language === 'en' ? 'Done' : 'Selesai',
+    options.json,
   );
   report(result, options.json, context.write, config.language);
   return result.status === 'partial' ? 1 : 0;
+}
+
+async function runSkillCommand(
+  command: Extract<Command, { kind: 'skill' }>,
+  context: Context,
+): Promise<number> {
+  if (!(skillIds as readonly string[]).includes(command.skill)) {
+    throw new Error(
+      `Unknown skill: ${command.skill}. Run my-skill-gweh list to see available skills.`,
+    );
+  }
+  const root = await projectRoot(path.resolve(context.cwd, command.target));
+  const configFile = await assertSafePath(root, CONFIG_PATH);
+  const current = await loadConfig(configFile);
+  const selected = new Set(current.skills);
+  if (command.action === 'enable') selected.add(command.skill as Config['skills'][number]);
+  else {
+    if (selected.has(command.skill as Config['skills'][number]) && selected.size === 1) {
+      throw new Error(
+        'Cannot disable the only selected skill. Enable another skill first or use update --reconfigure.',
+      );
+    }
+    selected.delete(command.skill as Config['skills'][number]);
+  }
+  const config: Config = {
+    ...current,
+    skills: skillIds.filter((skill) => selected.has(skill)),
+    skillCatalogRevision: SKILL_CATALOG_REVISION,
+  };
+  return runProject(
+    {
+      kind: 'project',
+      command: 'update',
+      target: command.target,
+      nonInteractive: command.dryRun,
+      reconfigure: false,
+      dryRun: command.dryRun,
+      json: command.json,
+    },
+    context,
+    config,
+  );
 }
 
 export async function runCommand(command: Command, context: Context): Promise<number> {
@@ -305,13 +429,23 @@ export async function runCommand(command: Command, context: Context): Promise<nu
       context.write(HELP);
       return 0;
     case 'version':
-      context.write(context.version);
+      context.write(
+        command.verbose
+          ? [
+              context.version,
+              `Install module: ${fileURLToPath(import.meta.url)}`,
+              `Node: ${process.version}`,
+            ].join(String.fromCharCode(10))
+          : context.version,
+      );
       return 0;
     case 'list':
       report({ agents, skills: catalog }, command.json, context.write);
       return 0;
     case 'project':
       return runProject(command, context);
+    case 'skill':
+      return runSkillCommand(command, context);
     case 'preset': {
       const directory = context.presets;
       if (command.action === 'list') {

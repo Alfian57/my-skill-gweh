@@ -54,3 +54,21 @@ test('retained documents rebase inline and reference links but leave code and co
   assert.match(moved, /\[example\]\(\.\.\/missing-fence\.md\)/u);
   assert.match(moved, /<!-- \[comment\]\(\.\.\/missing-comment\.md\) -->/u);
 });
+
+test('relocation ignores Markdown-looking text in raw HTML and matches duplicate destinations by source', () => {
+  const markdown = [
+    '<div>',
+    '[example](assets/file.md)',
+    '</div>',
+    '',
+    '[actual](assets/file.md)',
+  ].join('\n');
+  const moved = relocateMarkdownLinks(markdown, '/project', 'docs/old.md', 'docs/moved/new.md');
+  assert.match(moved, /\[example\]\(assets\/file\.md\)/u);
+  assert.match(moved, /\[actual\]\(\.\.\/assets\/file\.md\)/u);
+});
+
+test('relocation writes a dot destination when a directory link now targets the same folder', () => {
+  const moved = relocateMarkdownLinks('[folder](moved)\n', '/project', 'old.md', 'moved/new.md');
+  assert.equal(moved, '[folder](.)\n');
+});

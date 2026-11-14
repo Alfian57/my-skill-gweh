@@ -8,8 +8,10 @@ import { stackCatalog, type StackTechnology } from './stack.js';
 import { BEGIN_MARKER, END_MARKER } from './managed-content.js';
 import {
   createScanBudget,
-  PROJECT_SCAN_ENTRY_LIMIT,
+  hasNestedProjectBoundary,
+  isIgnoredProjectDirectory,
   PROJECT_SCAN_DEPTH_LIMIT,
+  PROJECT_SCAN_ENTRY_LIMIT,
   readBoundedDirectory,
   readProjectInput,
   scanDiagnostics,
@@ -57,25 +59,6 @@ export interface ProjectContext {
   uiEvidence: boolean;
   nextRouter: 'app' | 'pages' | 'mixed' | 'unknown';
 }
-
-const excludedDirectories = new Set([
-  '.git',
-  '.my-skill-gweh',
-  'node_modules',
-  'vendor',
-  'dist',
-  'build',
-  '.next',
-  'coverage',
-  'storage',
-  'target',
-  '.turbo',
-  '.cache',
-  '.output',
-  '.svelte-kit',
-  '.vercel',
-  'out',
-]);
 
 const areaDefinitions: Array<{ label: Localized; roots: string[] }> = [
   {
@@ -177,17 +160,37 @@ function commandsFrom(manager: string | undefined, scripts: unknown): DeclaredCo
   );
 }
 
+async function safeComponents(root: string, relative: string): Promise<string> {
+  const target = safe(root, relative);
+  const parts = path.relative(root, target).split(path.sep);
+  let current = root;
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    try {
+      const stat = await fs.lstat(current);
+      if (stat.isSymbolicLink()) throw new Error(`Refusing symlink in project context: ${current}`);
+      if (index < parts.length - 1 && !stat.isDirectory()) {
+        throw new Error(`Expected a directory in project context: ${current}`);
+      }
+    } catch (error) {
+      if (isFileError(error, 'ENOENT')) break;
+      throw error;
+    }
+  }
+  return target;
+}
+
 async function exists(root: string, relative: string): Promise<boolean> {
   try {
-    const stat = await fs.lstat(safe(root, relative));
-    return !stat.isSymbolicLink() && (stat.isDirectory() || stat.isFile());
+    const stat = await fs.lstat(await safeComponents(root, relative));
+    return stat.isDirectory() || stat.isFile();
   } catch {
     return false;
   }
 }
 
 async function containsUserInstructions(root: string, relative: string): Promise<boolean> {
-  const content = await readOptional(safe(root, relative));
+  const content = await readOptional(await safeComponents(root, relative));
   if (content === undefined) return false;
   const begin = content.indexOf(BEGIN_MARKER);
   const end = content.indexOf(END_MARKER);
@@ -224,7 +227,7 @@ async function collectPaths(
     const { relative: current, depth } = item;
     let entries;
     try {
-      entries = await readBoundedDirectory(safe(root, current), budget);
+      entries = await readBoundedDirectory(await safeComponents(root, current), budget);
     } catch (error) {
       if (isFileError(error, 'EACCES') || isFileError(error, 'EPERM'))
         budget.diagnostics.push(`Skipped unreadable repository directory ${current}.`);
@@ -233,7 +236,11 @@ async function collectPaths(
     for (const entry of entries) {
       const child = path.posix.join(current.split(path.sep).join('/'), entry.name);
       if (entry.isDirectory()) {
-        if (!excludedDirectories.has(entry.name.toLowerCase()) && !isGeneratedPath(child, output)) {
+        if (
+          !isIgnoredProjectDirectory(entry.name) &&
+          !isGeneratedPath(child, output) &&
+          !(await hasNestedProjectBoundary(root, child))
+        ) {
           if (depth >= PROJECT_SCAN_DEPTH_LIMIT) budget.truncated = true;
           else pending.push({ relative: child, depth: depth + 1 });
         }

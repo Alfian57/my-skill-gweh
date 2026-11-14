@@ -43,11 +43,20 @@ function conflictMessage(detail: Record<string, unknown>, language: Language): s
       'The destination already contains content not managed by the generator.',
       'Tujuan sudah berisi konten yang tidak dikelola generator.',
     ],
+    'developer-notes': [
+      'This file contains developer notes, but its destination guide is not selected.',
+      'File ini berisi catatan developer, tetapi panduan tujuannya tidak dipilih.',
+    ],
   };
   return messages[code]?.[language === 'en' ? 0 : 1] ?? String(detail.reason ?? '');
 }
 
-function generationReport(value: Record<string, unknown>, write: Write, language: Language): void {
+function generationReport(
+  value: Record<string, unknown>,
+  write: Write,
+  language: Language,
+  previewKind?: 'confirmation' | 'dry-run',
+): void {
   const status = String(value.status ?? 'unknown');
   const planned = isRecord(value.planned) ? value.planned : {};
   const writes = paths(planned.writes);
@@ -76,7 +85,13 @@ function generationReport(value: Record<string, unknown>, write: Write, language
           'Up to date; no files changed.',
           'Sudah terbaru; tidak ada file yang berubah.',
         )
-      : localized(language, statusText[status]?.[0] ?? status, statusText[status]?.[1] ?? status),
+      : status === 'preview' && previewKind === 'confirmation'
+        ? localized(
+            language,
+            'Review this plan; no files have been written. Confirm to apply it.',
+            'Tinjau rencana ini; belum ada file yang ditulis. Konfirmasi untuk menerapkannya.',
+          )
+        : localized(language, statusText[status]?.[0] ?? status, statusText[status]?.[1] ?? status),
   );
 
   if (status === 'preview' || status === 'blocked') {
@@ -161,6 +176,7 @@ export function report(
   json: boolean,
   write: Write,
   language: Language = 'id',
+  options: { previewKind?: 'confirmation' | 'dry-run' } = {},
 ): void {
   if (json || typeof value !== 'object' || value === null) {
     write(typeof value === 'string' && !json ? value : JSON.stringify(value, null, 2));
@@ -168,7 +184,7 @@ export function report(
   }
   const record = value as Record<string, unknown>;
   if (typeof record.status === 'string' && isRecord(record.planned)) {
-    generationReport(record, write, language);
+    generationReport(record, write, language, options.previewKind);
     return;
   }
   if (typeof record.state === 'string' && Array.isArray(record.invalidReferences)) {

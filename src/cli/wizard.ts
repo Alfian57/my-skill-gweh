@@ -1,5 +1,5 @@
 import * as prompts from '@clack/prompts';
-import { agents, rules, skillIds, type Language } from '../catalog.js';
+import { agents, rules, skillIds, SKILL_CATALOG_REVISION, type Language } from '../catalog.js';
 import { validateOutput, parseConfig, type Config } from '../config.js';
 import { CancelledError, errorMessage } from '../errors.js';
 import type { Detection } from '../detection.js';
@@ -34,6 +34,7 @@ const skillLabels: Record<Language, Record<(typeof skillIds)[number], string>> =
     forms: 'Forms and validation',
     'ui-tests': 'UI tests',
     accessibility: 'Accessibility',
+    mascot: 'UI mascot (optional)',
     dependencies: 'Dependencies',
   },
   id: {
@@ -47,6 +48,7 @@ const skillLabels: Record<Language, Record<(typeof skillIds)[number], string>> =
     forms: 'Form dan validasi',
     'ui-tests': 'Test UI',
     accessibility: 'Aksesibilitas',
+    mascot: 'Maskot UI (opsional)',
     dependencies: 'Dependency',
   },
 };
@@ -277,8 +279,8 @@ export async function configure(
   config.skills = answer(
     await io.multiselect({
       message: english
-        ? 'Engineering skills (strict rules are opt-in)'
-        : 'Skill engineering (aturan ketat opsional)',
+        ? 'Project skills (engineering and optional workflows)'
+        : 'Skill proyek (engineering dan alur opsional)',
       options: skillIds.map((value) => ({
         value,
         label: skillLabels[config.language][value],
@@ -315,6 +317,7 @@ export async function configure(
       initialValue: config.git,
     }),
   );
+  config.skillCatalogRevision = SKILL_CATALOG_REVISION;
   return parseConfig(config);
 }
 

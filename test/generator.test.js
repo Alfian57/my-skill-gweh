@@ -11,6 +11,7 @@ import {
 } from '../dist/generator.js';
 import {
   fingerprint,
+  managedContentFingerprint,
   BEGIN_MARKER,
   END_MARKER,
   replaceManagedContent,
@@ -135,6 +136,54 @@ test('legacy release notes outside the managed block move into canonical docs an
     await fs.readFile(path.join(root, skillGuidePath(config.output, 'quality')), 'utf8'),
     /CUSTOM PROJECT RULE: preserve audit event names/u,
   );
+});
+
+test('flat-layout migration rebases developer-note links to the new guide location', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'], skills: ['quality'] };
+  const file = `${config.output}/quality.md`;
+  await fs.mkdir(path.join(root, 'assets'), { recursive: true });
+  await fs.writeFile(path.join(root, 'assets/manual.txt'), 'manual');
+  const generated = replaceManagedContent(
+    undefined,
+    { body: '# Old quality guide\n\nLegacy content.' },
+    undefined,
+  );
+  assert.ok(generated);
+  const original = `${generated.content}\n\n[Manual](../assets/manual.txt)\n`;
+  await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+  await fs.writeFile(path.join(root, file), original);
+  await writeJson(root, CONFIG_PATH, config);
+  await writeJson(root, MANIFEST_PATH, { [file]: generated.fingerprint });
+
+  const result = await generate(root, config);
+  assert.deepEqual(result.conflicts, []);
+  const canonical = await fs.readFile(
+    path.join(root, skillGuidePath(config.output, 'quality')),
+    'utf8',
+  );
+  assert.match(canonical, /\]\(\.\.\/\.\.\/assets\/manual\.txt\)/u);
+  assert.deepEqual((await doctor(root, config)).invalidReferences, []);
+});
+
+test('recovery ignores generator marker examples inside fenced and inline code', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'] };
+  await fs.writeFile(
+    path.join(root, 'README.md'),
+    [
+      '```md',
+      BEGIN_MARKER,
+      'Example managed content',
+      END_MARKER,
+      '```',
+      '',
+      `Inline: \`${BEGIN_MARKER}\` and \`${END_MARKER}\`.`,
+    ].join('\n'),
+  );
+  const plan = await planGeneration(root, config);
+  assert.ok(!plan.conflicts.includes('README.md'));
+  assert.ok(!plan.recovered.includes('README.md'));
 });
 
 test('recovery does not scan or mutate generated files inside a nested repository', async (t) => {
@@ -533,6 +582,22 @@ test('changed metadata is a conflict, even if the Markdown body is untouched', a
   assert.deepEqual(await snapshot(root), before);
 });
 
+test('forced canonical replacement preserves developer YAML frontmatter and signs it', () => {
+  const initial = replaceManagedContent(undefined, { body: 'Original generated text' }, undefined);
+  assert.ok(initial);
+  const original = `---\nowner: Alfian57\nreview: required\n---\n${initial.content}`;
+  const replacement = replaceManagedContent(
+    original,
+    { body: 'Updated generated text' },
+    undefined,
+    { force: true },
+  );
+  assert.ok(replacement);
+  assert.ok(replacement.content.startsWith('---\nowner: Alfian57\nreview: required\n---\n'));
+  assert.match(replacement.content, /Updated generated text/u);
+  assert.equal(managedContentFingerprint(replacement.content), replacement.fingerprint);
+});
+
 for (const mutation of [
   (text) => text.replace(END_MARKER, ''),
   (text) => text + `\n${BEGIN_MARKER}\n${END_MARKER}\n`,
@@ -622,6 +687,34 @@ test('doctor handles encoded links, reports missing references, and never writes
   assert.ok(result.missing.includes(skillGuidePath(config.output, 'quality')));
   assert.ok(result.invalidReferences.some((item) => item.target === 'engineering/quality.md'));
   assert.deepEqual(await snapshot(root), before);
+});
+
+test('doctor marks missing or drifting ownership baselines as unhealthy state', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'], skills: ['quality'] };
+  await generate(root, config);
+  await fs.unlink(path.join(root, BASELINE_PATH));
+
+  const report = await doctor(root, config);
+  assert.equal(report.state, 'orphaned');
+  assert.ok(report.missing.includes(BASELINE_PATH));
+  assert.ok(report.drift.includes(BASELINE_PATH));
+  assert.match(report.diagnostics.join('\n'), /baselines are missing/u);
+  assert.equal(isHealthy(report), false);
+});
+
+test('doctor rejects a corrupt baseline file without writing repairs', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'], skills: ['quality'] };
+  await generate(root, config);
+  await fs.writeFile(path.join(root, BASELINE_PATH), '{not json');
+  const before = await snapshot(root);
+
+  const report = await doctor(root, config);
+  assert.equal(report.state, 'invalid');
+  assert.match(report.diagnostics.join('\n'), /baselines|JSON|parse/u);
+  assert.deepEqual(await snapshot(root), before);
+  assert.equal(isHealthy(report), false);
 });
 
 test('doctor ignores code examples and accepts local directory links', async (t) => {

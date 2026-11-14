@@ -80,6 +80,23 @@ test('source detection does not follow symlinked directories', async (t) => {
   assert.deepEqual((await detect(root)).stack, []);
 });
 
+test('source detection stops at nested git repositories and initialized child projects', async (t) => {
+  const root = await fixture(t);
+  await fs.writeFile(path.join(root, 'main.go'), 'package main');
+  for (const directory of ['apps/git-child', 'apps/initialized-child']) {
+    await fs.mkdir(path.join(root, directory), { recursive: true });
+    await fs.writeFile(path.join(root, directory, 'page.tsx'), 'export default function Page() {}');
+  }
+  await fs.mkdir(path.join(root, 'apps/git-child/.git'), { recursive: true });
+  await fs.mkdir(path.join(root, 'apps/initialized-child/.my-skill-gweh'), { recursive: true });
+  await fs.writeFile(path.join(root, 'apps/initialized-child/.my-skill-gweh/config.json'), '{}');
+
+  const result = await detect(root);
+  assert.deepEqual(result.stack, ['go']);
+  assert.deepEqual(result.sourceEvidence, ['.go']);
+  assert.equal(result.uiEvidence, undefined);
+});
+
 test('project manifest symlinks are skipped with a diagnostic', async (t) => {
   const root = await fixture(t);
   const outside = await fixture(t);

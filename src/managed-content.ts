@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
+import * as commonmark from 'commonmark';
 import type { Document } from './render.js';
 
 export const BEGIN_MARKER = '<!-- BEGIN my-skill-gweh -->';
 export const END_MARKER = '<!-- END my-skill-gweh -->';
 const SIGNATURE = /^\r?\n<!-- my-skill-gweh-sha256:([a-f0-9]{64}) -->/u;
+const parser = new commonmark.Parser();
 
 function normalizeEol(value: string): string {
   return value.replace(/\r\n?/gu, '\n');
@@ -33,16 +35,48 @@ interface ParsedManagedContent {
   header: string;
 }
 
+function structuralMarkerPositions(content: string, marker: string): number[] {
+  const lines = content.split(/\r\n|\n|\r/u);
+  const codeLines = new Set<number>();
+  const walker = parser.parse(content).walker();
+  let step = walker.next();
+  while (step) {
+    const node = step.node;
+    if (step.entering && node.type === 'code_block' && node.sourcepos) {
+      const first = node.sourcepos[0][0];
+      const last = node.sourcepos[1][0];
+      for (let line = first; line <= last; line += 1) codeLines.add(line);
+    }
+    step = walker.next();
+  }
+
+  const positions: number[] = [];
+  let offset = 0;
+  for (const [index, line] of lines.entries()) {
+    if (!codeLines.has(index + 1) && line.trim() === marker) {
+      positions.push(offset + line.indexOf(marker));
+    }
+    offset +=
+      line.length +
+      (content.slice(offset + line.length, offset + line.length + 2) === '\r\n' ? 2 : 1);
+  }
+  return positions;
+}
+
+/** True only for structural marker lines; examples inside Markdown code are ignored. */
+export function containsManagedMarkers(content: string): boolean {
+  return (
+    structuralMarkerPositions(content, BEGIN_MARKER).length > 0 ||
+    structuralMarkerPositions(content, END_MARKER).length > 0
+  );
+}
+
 function parseManagedContent(original: string): ParsedManagedContent | undefined {
-  const begin = original.indexOf(BEGIN_MARKER);
-  const end = original.indexOf(END_MARKER);
-  if (
-    begin === -1 ||
-    end < begin ||
-    original.indexOf(BEGIN_MARKER, begin + BEGIN_MARKER.length) !== -1 ||
-    original.indexOf(END_MARKER, end + END_MARKER.length) !== -1
-  )
-    return undefined;
+  const begins = structuralMarkerPositions(original, BEGIN_MARKER);
+  const ends = structuralMarkerPositions(original, END_MARKER);
+  const begin = begins[0] ?? -1;
+  const end = ends.find((position) => position >= begin) ?? -1;
+  if (begin === -1 || end < begin || begins.length !== 1 || ends.length !== 1) return undefined;
 
   const prefix = original.slice(0, begin);
   const inner = original.slice(begin + BEGIN_MARKER.length, end);
@@ -132,7 +166,7 @@ export function replaceManagedContent(
         fingerprint: nextHash,
       };
     }
-    if (original.includes(BEGIN_MARKER) || original.includes(END_MARKER)) return undefined;
+    if (containsManagedMarkers(original)) return undefined;
     if (!document.appendable || expectedHash !== undefined) return undefined;
     const eol = eolOf(original);
     const separator = original && !original.endsWith(eol) ? `${eol}${eol}` : original ? eol : '';
@@ -152,11 +186,19 @@ export function replaceManagedContent(
       if (parsed.prefix && !parsed.header) {
         return { content: documentContent(document, eol, nextHash) + eol, fingerprint: nextHash };
       }
-      const replacement = documentContent(document, eol, nextHash);
-      const normalizedHeader = header ? normalizeEol(header).replace(/\n/gu, eol) : '';
+      const effectiveHeader = header || parsed.header;
+      const effectiveHash = ownedHash(block, effectiveHeader);
+      const replacement = documentContent(
+        { ...document, frontmatter: effectiveHeader },
+        eol,
+        effectiveHash,
+      );
+      const normalizedHeader = effectiveHeader
+        ? normalizeEol(effectiveHeader).replace(/\n/gu, eol)
+        : '';
       return {
         content: `${normalizedHeader}${replacement.slice(normalizedHeader.length)}${parsed.suffix}`,
-        fingerprint: nextHash,
+        fingerprint: effectiveHash,
       };
     }
     const replacement = documentContent(document, eol, nextHash);

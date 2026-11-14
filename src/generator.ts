@@ -18,6 +18,7 @@ import {
   fingerprint,
   BEGIN_MARKER,
   END_MARKER,
+  containsManagedMarkers,
   managedPayload,
   managedContentFingerprint,
   retainManagedContent,
@@ -30,6 +31,8 @@ import { skillIds } from './catalog.js';
 import { projectGuidePath, skillGuidePath } from './render.js';
 import {
   createScanBudget,
+  hasNestedProjectBoundary,
+  isIgnoredProjectDirectory,
   PROJECT_SCAN_ENTRY_LIMIT,
   PROJECT_SCAN_DEPTH_LIMIT,
   readBoundedDirectory,
@@ -44,6 +47,14 @@ import {
 import { relocateMarkdownLinks } from './markdown-links.js';
 
 export type GenerationStatus = 'preview' | 'applied' | 'partial' | 'blocked' | 'cancelled';
+export type ConflictReasonCode =
+  | 'unowned'
+  | 'ownership'
+  | 'overlap'
+  | 'work-limit'
+  | 'modified-removal'
+  | 'nested-project'
+  | 'developer-notes';
 
 export interface GenerationResult {
   /** Compatibility field: paths whose contents are scheduled for a write. */
@@ -70,8 +81,7 @@ export interface GenerationConflict {
   file: string;
   reason: string;
   kind: 'target' | 'stale' | 'orphan' | 'merge' | 'limit' | 'nested';
-  reasonCode?:
-    'unowned' | 'ownership' | 'overlap' | 'work-limit' | 'modified-removal' | 'nested-project';
+  reasonCode: ConflictReasonCode;
   existing?: string;
   proposed?: string;
   archivePath?: string;
@@ -118,25 +128,6 @@ export interface GenerationDecisions {
   >;
 }
 
-const ignoredScanDirectories = new Set([
-  '.git',
-  '.my-skill-gweh',
-  'node_modules',
-  'vendor',
-  'dist',
-  'build',
-  '.next',
-  'coverage',
-  '.turbo',
-  '.cache',
-  '.output',
-  '.svelte-kit',
-  '.vercel',
-  'out',
-  'target',
-  'storage',
-]);
-
 async function loadManifest(root: string): Promise<Record<string, string>> {
   const file = await assertSafePath(root, MANIFEST_PATH);
   const raw = await readOptional(file);
@@ -176,22 +167,6 @@ async function loadBaselines(root: string): Promise<Record<string, string>> {
   return value as Record<string, string>;
 }
 
-async function hasNestedProjectBoundary(root: string, relative: string): Promise<boolean> {
-  if (!relative) return false;
-  for (const marker of ['.git', `${STATE_DIRECTORY}/config.json`]) {
-    try {
-      await fs.lstat(safe(root, `${relative}/${marker}`));
-      return true;
-    } catch (error) {
-      if (!isFileError(error, 'ENOENT')) {
-        if (error instanceof Error && error.message.includes('symlink')) return true;
-        throw error;
-      }
-    }
-  }
-  return false;
-}
-
 async function scanManagedFiles(
   root: string,
 ): Promise<{ files: Array<{ file: string; content: string }>; diagnostics: string[] }> {
@@ -225,7 +200,7 @@ async function scanManagedFiles(
     for (const entry of entries) {
       const relative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        if (ignoredScanDirectories.has(entry.name.toLowerCase())) continue;
+        if (isIgnoredProjectDirectory(entry.name)) continue;
         if (depth >= PROJECT_SCAN_DEPTH_LIMIT) {
           budget.truncated = true;
           break;
@@ -240,7 +215,7 @@ async function scanManagedFiles(
         const stat = await fs.stat(file);
         if (stat.size > 1_000_000) continue;
         const content = await readOptional(file);
-        if (content && (content.includes(BEGIN_MARKER) || content.includes(END_MARKER))) {
+        if (content && containsManagedMarkers(content)) {
           found.push({ file: relative, content });
         }
       } catch {
@@ -332,12 +307,14 @@ function appendMigratedNotes(
   notes: string,
   source: string,
   language: Config['docsLanguage'],
+  root: string,
+  destination: string,
 ): Document {
   const title =
     language === 'en' ? 'Developer notes migrated from' : 'Catatan developer dipindahkan dari';
   return {
     ...document,
-    body: `${document.body.trimEnd()}\n\n## ${title} \`${source}\`\n\n${notes.trim()}\n`,
+    body: `${document.body.trimEnd()}\n\n## ${title} \`${source}\`\n\n${relocateMarkdownLinks(notes, root, source, destination).trim()}\n`,
   };
 }
 
@@ -379,9 +356,9 @@ function addConflict(
   file: string,
   reason: string,
   kind: GenerationConflict['kind'],
-  existing?: string,
-  proposed?: string,
-  extra: Partial<GenerationConflict> = {},
+  existing: string | undefined,
+  proposed: string | undefined,
+  extra: Partial<GenerationConflict> & { reasonCode: ConflictReasonCode },
 ): void {
   conflicts.push({
     file,
@@ -510,7 +487,7 @@ export async function planGeneration(
     const withNotes = (body: string): Document =>
       notes.reduce(
         (current, item) =>
-          appendMigratedNotes(current, item.notes, item.source, config.docsLanguage),
+          appendMigratedNotes(current, item.notes, item.source, config.docsLanguage, base, file),
         { ...document, body },
       );
     let replacement: ReturnType<typeof replaceManagedContent>;
@@ -614,14 +591,15 @@ export async function planGeneration(
         skipped.push(file);
         continue;
       }
-      const reason = original?.includes(BEGIN_MARKER)
+      const hasMarker = original !== undefined && containsManagedMarkers(original);
+      const reason = hasMarker
         ? 'Managed ownership could not be verified; the content may have been edited or generated by an older version.'
         : 'The destination already contains unowned content.';
       const proposed =
         replaceManagedContent(undefined, withNotes(document.body), undefined)?.content ??
         document.body;
       addConflict(conflictDetails, file, reason, 'target', original, proposed, {
-        reasonCode: original?.includes(BEGIN_MARKER) ? 'ownership' : 'unowned',
+        reasonCode: hasMarker ? 'ownership' : 'unowned',
       });
       continue;
     }
@@ -644,6 +622,9 @@ export async function planGeneration(
           file,
           'This path is inside a nested project; the parent generator will not remove or adopt it.',
           'stale',
+          undefined,
+          undefined,
+          { reasonCode: 'nested-project' },
         );
       continue;
     }
@@ -736,6 +717,8 @@ export async function planGeneration(
           `This file contains developer notes but its destination guide is not selected: ${legacyTarget}`,
           'stale',
           original,
+          undefined,
+          { reasonCode: 'developer-notes' },
         );
       continue;
     }

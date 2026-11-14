@@ -5,6 +5,7 @@ import path from 'node:path';
 import { defaults, CONFIG_PATH } from '../dist/config.js';
 import { parseCommand } from '../dist/cli/options.js';
 import { runCommand } from '../dist/cli/commands.js';
+import { report } from '../dist/cli/output.js';
 import { CancelledError } from '../dist/errors.js';
 import { configure, recommendedSkills } from '../dist/cli/wizard.js';
 import { fixture, runCli, snapshot, writeJson } from './helpers.js';
@@ -18,6 +19,10 @@ for (const args of [
   ['doctor', '--dry-run'],
   ['update', '--reconfigure', '--non-interactive'],
   ['init', '--json'],
+  ['skill'],
+  ['skill', 'add', 'mascot'],
+  ['skill', 'enable'],
+  ['skill', 'enable', 'mascot', '--json'],
   ['--unknown-flag'],
 ]) {
   test(`invalid CLI arguments fail clearly: ${args.join(' ')}`, async (t) => {
@@ -70,6 +75,215 @@ test('init, update --config, doctor and dry-run work through the public executab
     1,
     'init --config must not bypass the existing-project guard',
   );
+});
+
+test('old project configs are notified of new optional skills without enabling them', async (t) => {
+  const root = await fixture(t);
+  const { skillCatalogRevision: _revision, ...legacyConfig } = {
+    ...defaults(),
+    agents: ['codex'],
+    skills: ['quality'],
+  };
+  await writeJson(root, CONFIG_PATH, legacyConfig);
+  const { generate } = await import('../dist/generator.js');
+  await generate(root, legacyConfig);
+  let stored = JSON.parse(await fs.readFile(path.join(root, CONFIG_PATH), 'utf8'));
+  assert.ok(!('skillCatalogRevision' in stored));
+
+  const output = [];
+  await runCommand(parseCommand(['update']), {
+    cwd: root,
+    version: 'test',
+    interactive: true,
+    write: (line) => output.push(line),
+    presets: path.join(root, 'presets'),
+    prompts: { confirm: async () => true, select: async (options) => options.initialValue },
+  });
+  assert.match(output.join('\n'), /skill enable mascot/u);
+  stored = JSON.parse(await fs.readFile(path.join(root, CONFIG_PATH), 'utf8'));
+  assert.deepEqual(stored.skills, ['quality']);
+  assert.ok(!('skillCatalogRevision' in stored));
+});
+
+test('optional-skill notices stay on stderr beside JSON reports', async (t) => {
+  const root = await fixture(t);
+  const { skillCatalogRevision: _revision, ...legacyConfig } = {
+    ...defaults(),
+    agents: ['codex'],
+    skills: ['quality'],
+  };
+  await writeJson(root, CONFIG_PATH, legacyConfig);
+  const { generate } = await import('../dist/generator.js');
+  await generate(root, legacyConfig);
+
+  const result = runCli(root, ['update', '--non-interactive', '--dry-run', '--json']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).conflicts, []);
+  assert.match(result.stderr, /skill enable mascot/u);
+  assert.doesNotMatch(result.stdout, /New optional skill|Skill opsional/u);
+});
+
+test('disabling the only selected skill fails without changing project files', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'], skills: ['quality'] };
+  await writeJson(root, CONFIG_PATH, config);
+  const { generate } = await import('../dist/generator.js');
+  await generate(root, config);
+  const before = await snapshot(root);
+
+  await assert.rejects(
+    runCommand(parseCommand(['skill', 'disable', 'quality']), {
+      cwd: root,
+      version: 'test',
+      interactive: true,
+      write() {},
+      presets: path.join(root, 'presets'),
+    }),
+    /only selected skill/u,
+  );
+  assert.deepEqual(await snapshot(root), before);
+});
+
+test('skill enable and disable use the update safety flow and preserve project mascot assets', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'], skills: ['quality'] };
+  await writeJson(root, CONFIG_PATH, config);
+  const { generate } = await import('../dist/generator.js');
+  await generate(root, config);
+  const profile = path.join(root, `${config.output}/project/mascot.md`);
+  const asset = path.join(root, 'assets/mascot/guide.png');
+  await fs.mkdir(path.dirname(profile), { recursive: true });
+  await fs.writeFile(profile, '# Mascot identity\n');
+  await fs.mkdir(path.dirname(asset), { recursive: true });
+  await fs.writeFile(asset, 'mascot reference');
+  const output = [];
+  const context = {
+    cwd: root,
+    version: 'test',
+    interactive: true,
+    write: (line) => output.push(line),
+    presets: path.join(root, 'presets'),
+    prompts: {
+      select: async (options) => {
+        if (options.options?.some((option) => option.value === 'delete')) return 'delete';
+        return options.initialValue;
+      },
+      confirm: async () => true,
+    },
+  };
+
+  assert.equal(await runCommand(parseCommand(['skill', 'enable', 'mascot']), context), 0);
+  const guide = path.join(root, config.output, 'application/mascot.md');
+  assert.ok(await fs.readFile(guide, 'utf8'));
+  assert.ok(
+    await fs.readFile(path.join(root, config.output, 'application/mascot-concepts.md'), 'utf8'),
+  );
+  await fs.appendFile(guide, '\nDeveloper note: keep this image identity.\n');
+
+  assert.equal(await runCommand(parseCommand(['skill', 'disable', 'mascot']), context), 0);
+  const updated = JSON.parse(await fs.readFile(path.join(root, CONFIG_PATH), 'utf8'));
+  assert.deepEqual(updated.skills, ['quality']);
+  await assert.rejects(fs.access(guide));
+  await assert.rejects(fs.access(path.join(root, '.agents/skills/my-skill-gweh-mascot/SKILL.md')));
+  assert.ok(output.some((line) => line.includes('backup:')));
+  assert.equal(await fs.readFile(profile, 'utf8'), '# Mascot identity\n');
+  assert.equal(await fs.readFile(asset, 'utf8'), 'mascot reference');
+});
+
+test('JSON mode suppresses progress spinners and writes exactly one JSON document', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'], skills: ['quality'] };
+  await writeJson(root, CONFIG_PATH, config);
+  const { generate } = await import('../dist/generator.js');
+  await generate(root, config);
+  let spinnerCalls = 0;
+  const output = [];
+  const status = await runCommand(
+    parseCommand(['update', '--non-interactive', '--dry-run', '--json']),
+    {
+      cwd: root,
+      version: 'test',
+      interactive: true,
+      write: (line) => output.push(line),
+      presets: path.join(root, 'presets'),
+      spinner: () => ({
+        start() {
+          spinnerCalls += 1;
+        },
+        stop() {
+          spinnerCalls += 1;
+        },
+      }),
+    },
+  );
+  assert.equal(status, 0);
+  assert.equal(spinnerCalls, 0);
+  assert.equal(output.length, 1);
+  assert.equal(JSON.parse(output[0]).status, 'preview');
+});
+
+test('progress spinners stop with a completion label', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'], skills: ['quality'] };
+  await writeJson(root, CONFIG_PATH, config);
+  const { generate } = await import('../dist/generator.js');
+  await generate(root, config);
+  t.mock.method(globalThis, 'setTimeout', (callback) => {
+    callback();
+    return 1;
+  });
+  const stopped = [];
+  await runCommand(parseCommand(['update']), {
+    cwd: root,
+    version: 'test',
+    interactive: true,
+    write() {},
+    presets: path.join(root, 'presets'),
+    spinner: () => ({ start() {}, stop: (message) => stopped.push(message) }),
+  });
+  assert.ok(stopped.includes('Selesai'));
+});
+
+test('doctor uses the saved CLI language', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), language: 'en', agents: ['codex'], skills: ['quality'] };
+  await writeJson(root, CONFIG_PATH, config);
+  const { generate } = await import('../dist/generator.js');
+  await generate(root, config);
+  const result = runCli(root, ['doctor']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Project state: initialized/u);
+  assert.doesNotMatch(result.stdout, /Status project/u);
+});
+
+test('preview before confirmation is distinct from a dry run', () => {
+  const preview = {
+    status: 'preview',
+    planned: { writes: ['guide.md'], removals: [], backups: [], metadata: [] },
+  };
+  const confirmation = [];
+  const dryRun = [];
+  report(preview, false, (line) => confirmation.push(line), 'id', {
+    previewKind: 'confirmation',
+  });
+  report(preview, false, (line) => dryRun.push(line), 'id', { previewKind: 'dry-run' });
+  assert.match(confirmation[0], /Tinjau rencana ini/u);
+  assert.match(dryRun[0], /Pratinjau saja/u);
+});
+
+test('verbose version identifies the running install while plain version stays compatible', async () => {
+  const output = [];
+  const context = {
+    cwd: process.cwd(),
+    version: '0.1.4',
+    interactive: false,
+    write: (line) => output.push(line),
+    presets: process.cwd(),
+  };
+  await runCommand(parseCommand(['--version']), context);
+  assert.equal(output.pop(), '0.1.4');
+  await runCommand(parseCommand(['--version', '--verbose']), context);
+  assert.match(output.pop(), /Install module: .*commands\.js\nNode: v/u);
 });
 
 test('JSON update emits one JSON document when recovering managed files', async (t) => {
@@ -266,6 +480,10 @@ test('skill recommendations follow the selected stack but remain editable', () =
     'accessibility',
     'dependencies',
   ]);
+  for (const stack of [[], ['php', 'laravel'], ['typescript', 'react', 'nextjs'], ['go', 'gin']]) {
+    assert.ok(!recommendedSkills(stack, true).includes('mascot'), stack.join('+'));
+  }
+  assert.ok(!defaults().skills.includes('mascot'));
 });
 
 test('wizard preselects recommendations after the stack checkbox choice', async () => {
@@ -363,6 +581,8 @@ test('interactive update resolves overlapping canonical edits per hunk and previ
   await writeJson(root, CONFIG_PATH, { ...config, docsLanguage: 'id' });
   const selected = [];
   const output = [];
+  let changedDuringPrompt = false;
+  let conflictPrompts = 0;
   const status = await runCommand(parseCommand(['update']), {
     cwd: root,
     version: 'test',
@@ -373,6 +593,15 @@ test('interactive update resolves overlapping canonical edits per hunk and previ
       select: async (options) => {
         if (/^(?:Conflict|Konflik)/u.test(String(options.message))) {
           selected.push(options.options.map((item) => item.value));
+          conflictPrompts += 1;
+          if (!changedDuringPrompt) {
+            changedDuringPrompt = true;
+            const latest = await fs.readFile(guide, 'utf8');
+            await fs.writeFile(
+              guide,
+              latest.replace('Keep my modules focused', 'Keep my custom modules focused'),
+            );
+          }
           return 'both';
         }
         return options.initialValue;
@@ -382,6 +611,7 @@ test('interactive update resolves overlapping canonical edits per hunk and previ
   });
   assert.equal(status, 0, output.join('\n'));
   assert.ok(selected.length > 0, output.join('\n'));
+  assert.ok(conflictPrompts >= 2, output.join('\n'));
   assert.ok(
     selected[0].includes('local') &&
       selected[0].includes('generated') &&
@@ -390,7 +620,7 @@ test('interactive update resolves overlapping canonical edits per hunk and previ
   assert.match(output.join('\n'), /Pratinjau isi akhir/u);
   assert.match(output.join('\n'), /\+Jaga modul tetap terfokus/u);
   const updated = await fs.readFile(guide, 'utf8');
-  assert.match(updated, /Keep my modules focused/u);
+  assert.match(updated, /Keep my custom modules focused/u);
   assert.match(updated, /Jaga modul tetap terfokus/u);
   assert.match(updated, /Local-only note/u);
 });

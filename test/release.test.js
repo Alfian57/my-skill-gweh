@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { releaseInfo } from '../scripts/release-info.mjs';
+import { verifyPublishedVersion } from '../scripts/verify-publication.mjs';
 
 const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const source = {
@@ -71,4 +72,83 @@ test('publication retries skip only an identical immutable tarball', async () =>
     /different tarball/,
   );
   assert.throws(() => publicationNeeded(bytes, {}), /different tarball/);
+});
+
+test('post-publish verification retries 404 and transient errors until exact integrity appears', async () => {
+  const { createHash } = await import('node:crypto');
+  const bytes = Buffer.from('verified package');
+  const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+  let now = 0;
+  let calls = 0;
+  const result = await verifyPublishedVersion({
+    name: metadata.name,
+    version: metadata.version,
+    tarball: bytes,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) return { ok: false, status: 404 };
+      if (calls === 2) return { ok: false, status: 503 };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ version: metadata.version, dist: { integrity } }),
+      };
+    },
+    sleepImpl: async (milliseconds) => {
+      now += milliseconds;
+    },
+    nowImpl: () => now,
+    timeoutMs: 100,
+    pollIntervalMs: 10,
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(result, { name: metadata.name, version: metadata.version, integrity });
+});
+
+test('post-publish verification rejects wrong immutable bytes and non-retryable registry errors', async () => {
+  const { createHash } = await import('node:crypto');
+  const bytes = Buffer.from('expected package');
+  const wrong = Buffer.from('different package');
+  const wrongIntegrity = `sha512-${createHash('sha512').update(wrong).digest('base64')}`;
+  await assert.rejects(
+    verifyPublishedVersion({
+      name: metadata.name,
+      version: metadata.version,
+      tarball: bytes,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ version: metadata.version, dist: { integrity: wrongIntegrity } }),
+      }),
+    }),
+    /different tarball/u,
+  );
+  await assert.rejects(
+    verifyPublishedVersion({
+      name: metadata.name,
+      version: metadata.version,
+      tarball: bytes,
+      fetchImpl: async () => ({ ok: false, status: 403 }),
+    }),
+    /HTTP 403/u,
+  );
+});
+
+test('post-publish verification stops after its bounded wait', async () => {
+  let now = 0;
+  await assert.rejects(
+    verifyPublishedVersion({
+      name: metadata.name,
+      version: metadata.version,
+      tarball: Buffer.from('expected package'),
+      fetchImpl: async () => ({ ok: false, status: 404 }),
+      sleepImpl: async (milliseconds) => {
+        now += milliseconds;
+      },
+      nowImpl: () => now,
+      timeoutMs: 25,
+      pollIntervalMs: 10,
+    }),
+    /within 25 ms/u,
+  );
 });

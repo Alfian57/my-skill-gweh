@@ -1,6 +1,13 @@
 import path from 'node:path';
 import { lstat } from 'node:fs/promises';
-import { CONFIG_PATH, MANIFEST_PATH, defaults, loadConfig, type Config } from './config.js';
+import {
+  BASELINE_PATH,
+  CONFIG_PATH,
+  MANIFEST_PATH,
+  defaults,
+  loadConfig,
+  type Config,
+} from './config.js';
 import { assertSafePath, projectRoot, readOptional, safe } from './filesystem.js';
 import { planGeneration } from './generator.js';
 import { errorMessage, isFileError } from './errors.js';
@@ -60,9 +67,11 @@ export async function doctor(root: string, input?: Config): Promise<DoctorReport
 
   let configFile: string;
   let manifestFile: string;
+  let baselineFile: string;
   try {
     configFile = await assertSafePath(base, CONFIG_PATH);
     manifestFile = await assertSafePath(base, MANIFEST_PATH);
+    baselineFile = await assertSafePath(base, BASELINE_PATH);
   } catch (error) {
     return emptyReport(
       'invalid',
@@ -73,6 +82,7 @@ export async function doctor(root: string, input?: Config): Promise<DoctorReport
   }
   const persisted = await readOptional(configFile);
   const persistedManifest = await readOptional(manifestFile);
+  const persistedBaselines = await readOptional(baselineFile);
   let config = input;
   if (!config && persisted !== undefined) {
     try {
@@ -91,7 +101,7 @@ export async function doctor(root: string, input?: Config): Promise<DoctorReport
     const plan = await planGeneration(base, config ?? defaults());
     const report: DoctorReport = {
       state: hasConfig
-        ? persistedManifest === undefined
+        ? persistedManifest === undefined || persistedBaselines === undefined
           ? 'orphaned'
           : 'initialized'
         : plan.recovered.length ||
@@ -101,7 +111,7 @@ export async function doctor(root: string, input?: Config): Promise<DoctorReport
           : 'fresh',
       missing: [],
       conflicts: plan.conflicts,
-      drift: [...plan.changes, ...plan.removals].map(({ file }) => file),
+      drift: [...plan.changes, ...plan.removals, ...plan.metadata].map(({ file }) => file),
       orphaned: [
         ...new Set([
           ...plan.recovered,
@@ -114,12 +124,21 @@ export async function doctor(root: string, input?: Config): Promise<DoctorReport
         ...(hasConfig && persistedManifest === undefined
           ? ['Ownership manifest is missing; managed files require recovery before update.']
           : []),
+        ...(hasConfig && persistedBaselines === undefined
+          ? [
+              'Generated guide baselines are missing; customized guides cannot be safely merged until state is repaired.',
+            ]
+          : []),
         ...(lockDiagnostic ? [lockDiagnostic] : []),
         ...plan.diagnostics,
       ],
       invalidReferences: [],
       lock,
     };
+    if (hasConfig) {
+      if (persistedManifest === undefined) report.missing.push(MANIFEST_PATH);
+      if (persistedBaselines === undefined) report.missing.push(BASELINE_PATH);
+    }
     for (const file of plan.files) {
       const content = await readOptional(await assertSafePath(plan.root, file));
       if (content === undefined) {

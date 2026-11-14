@@ -15,25 +15,35 @@ export type Command =
   | ProjectOptions
   | { kind: 'list'; json: boolean }
   | {
+      kind: 'skill';
+      action: 'enable' | 'disable';
+      skill: string;
+      target: string;
+      dryRun: boolean;
+      json: boolean;
+    }
+  | {
       kind: 'preset';
       action: 'save' | 'list' | 'show' | 'remove';
       name?: string;
       config?: string;
       json: boolean;
     }
-  | { kind: 'help' | 'version' };
+  | { kind: 'help' }
+  | { kind: 'version'; verbose: boolean };
 
 export const HELP = `my-skill-gweh init|update|doctor [path]
 my-skill-gweh list [--json]
+my-skill-gweh skill enable|disable <id> [path]
 my-skill-gweh preset save|list|show|remove [name]
 
 --config file       Configuration input for init, update or preset save
 --non-interactive   Use explicit configuration without prompting
---dry-run           Preview init/update without writing files
+--dry-run           Preview init/update/skill changes without writing files
 --reconfigure       Reopen the wizard for update
 --json              Emit machine-readable output
 -h, --help          Show this help
--v, --version       Show the package version`;
+-v, --version       Show the package version; --verbose shows install details`;
 
 export function parseCommand(args: string[]): Command {
   const { positionals, values } = parseArgs({
@@ -45,12 +55,14 @@ export function parseCommand(args: string[]): Command {
       'non-interactive': { type: 'boolean' },
       reconfigure: { type: 'boolean' },
       json: { type: 'boolean' },
+      verbose: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
     },
   });
   if (values.help) return { kind: 'help' };
-  if (values.version) return { kind: 'version' };
+  if (values.version) return { kind: 'version', verbose: values.verbose ?? false };
+  if (values.verbose) throw new Error('--verbose requires --version.');
   const [command = 'init', target, ...extra] = positionals;
   const json = values.json ?? false;
 
@@ -77,6 +89,31 @@ export function parseCommand(args: string[]): Command {
       json,
       ...(extra[0] ? { name: extra[0] } : {}),
       ...(values.config ? { config: values.config } : {}),
+    };
+  }
+
+  if (command === 'skill') {
+    const action = target;
+    if (action !== 'enable' && action !== 'disable') {
+      throw new Error('Skill action must be enable or disable.');
+    }
+    if (extra.length < 1 || extra.length > 2) {
+      throw new Error(`Usage: my-skill-gweh skill ${action} ID [path]`);
+    }
+    if (values.config || values.reconfigure || values['non-interactive']) {
+      throw new Error(
+        'Skill commands do not support --config, --reconfigure or --non-interactive.',
+      );
+    }
+    if (json && !values['dry-run'])
+      throw new Error('--json for skill commands requires --dry-run.');
+    return {
+      kind: 'skill',
+      action,
+      skill: extra[0]!,
+      target: extra[1] ?? '.',
+      dryRun: values['dry-run'] ?? false,
+      json,
     };
   }
 

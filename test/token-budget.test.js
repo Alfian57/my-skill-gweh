@@ -122,3 +122,61 @@ test('native skill metadata has distinct, task-specific descriptions within the 
   assert.match(documents['AGENTS.md'].body, /read only the relevant skill guide/u);
   assert.doesNotMatch(documents['AGENTS.md'].body, /read all|complete guide for each/u);
 });
+
+test('quality plus project workflow remains within the startup guidance character budget', () => {
+  for (const scenario of [
+    { language: 'en', agent: 'codex' },
+    { language: 'id', agent: 'claude' },
+  ]) {
+    const config = {
+      ...defaults(),
+      docsLanguage: scenario.language,
+      agents: [scenario.agent],
+      skills: ['quality'],
+    };
+    const documents = renderDocuments(
+      '/virtual/project',
+      config,
+      { stack: [], evidence: [], commands: {}, ecosystems: [], sourceEvidence: [] },
+      { ...context, stack: [], detectedStack: [], uiEvidence: false },
+    );
+    const nativeDirectory = scenario.agent === 'claude' ? '.claude/skills' : '.agents/skills';
+    const entrypoint = scenario.agent === 'claude' ? 'CLAUDE.md' : 'AGENTS.md';
+    const relevant = [
+      entrypoint,
+      `${config.output}/README.md`,
+      `${config.output}/project/workflow.md`,
+      `${nativeDirectory}/my-skill-gweh-quality/SKILL.md`,
+      skillGuidePath(config.output, 'quality'),
+    ];
+    const characters = relevant.reduce((sum, file) => sum + managedLength(documents[file]), 0);
+    assert.ok(
+      characters < 8_000,
+      `${scenario.language}/${scenario.agent} used ${characters} chars`,
+    );
+  }
+});
+
+test('mascot pose guidance stays short and concept detail is loaded only for a new identity', () => {
+  for (const language of ['en', 'id']) {
+    const config = { ...defaults(), docsLanguage: language, agents: ['codex'], skills: ['mascot'] };
+    const documents = renderDocuments(
+      '/virtual/project',
+      config,
+      { stack: [], evidence: [], commands: {}, ecosystems: [], sourceEvidence: [] },
+      { ...context, stack: [], detectedStack: [], uiEvidence: false },
+    );
+    const guide = documents[skillGuidePath(config.output, 'mascot')].body;
+    const concepts = documents[`${config.output}/application/mascot-concepts.md`].body;
+    assert.ok(
+      guide.length < 1_500,
+      `${language} mascot pose instructions used ${guide.length} chars`,
+    );
+    assert.ok(
+      concepts.length < 5_000,
+      `${language} concept workflow used ${concepts.length} chars`,
+    );
+    assert.doesNotMatch(guide, /four separate PNGs|empat file PNG terpisah/u);
+    assert.match(concepts, /four separate PNGs|empat file PNG terpisah/u);
+  }
+});

@@ -80,8 +80,9 @@ The workflow:
 3. Builds and installs the release tarball in the publishing job, then verifies `--version`, `init`, idempotent `update`, `doctor`, and native skill frontmatter.
 4. Uploads the tested tarball and checksum as a workflow artifact for 30 days.
 5. Publishes that exact tarball with OIDC and provenance, without rebuilding during publication. Stable versions use `latest`; prerelease versions such as `0.2.0-beta.1` use `next`.
+6. Polls the npm registry for up to five minutes and verifies that the published version exposes the same integrity digest as the tested tarball. Temporary registry propagation errors are retried; a digest mismatch or non-retryable registry error fails the workflow.
 
-After the workflow succeeds:
+After the workflow succeeds, confirm the publication and install it locally:
 
 ```sh
 npm view my-skill-gweh version

@@ -41,3 +41,20 @@ test('configuration snapshots arrays and accepts portable custom folders', () =>
   assert.equal(parsed.output, input.output);
   assert.equal('customSkills' in parsed, false);
 });
+
+test('mascot is an explicit skill and remains absent from generated defaults', () => {
+  assert.ok(!defaults().skills.includes('mascot'));
+  assert.deepEqual(parseConfig({ ...defaults(), skills: ['quality', 'mascot'] }).skills, [
+    'quality',
+    'mascot',
+  ]);
+});
+
+test('catalog review revision is optional for old projects and validated when present', () => {
+  const { skillCatalogRevision: _revision, ...legacy } = defaults();
+  assert.equal('skillCatalogRevision' in parseConfig(legacy), false);
+  assert.equal(parseConfig(defaults()).skillCatalogRevision, 1);
+  assert.throws(() => parseConfig({ ...defaults(), skillCatalogRevision: -1 }));
+  assert.throws(() => parseConfig({ ...defaults(), skillCatalogRevision: 1.5 }));
+  assert.throws(() => parseConfig({ ...defaults(), skillCatalogRevision: 99 }));
+});

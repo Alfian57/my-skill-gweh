@@ -83,6 +83,27 @@ function maskNonMarkdown(source: string): boolean[] {
     offset = lineEnd + 1;
   }
 
+  const offsets = [0];
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === '\n') offsets.push(index + 1);
+  }
+  const walker = parser.parse(source).walker();
+  let step = walker.next();
+  while (step) {
+    const node = step.node;
+    if (
+      step.entering &&
+      (node.type === 'code_block' || node.type === 'html_block') &&
+      node.sourcepos
+    ) {
+      const start = offsets[node.sourcepos[0][0] - 1] ?? 0;
+      const endLineStart = offsets[node.sourcepos[1][0]];
+      const end = endLineStart === undefined ? source.length : endLineStart;
+      for (let index = start; index < end; index += 1) mask[index] = false;
+    }
+    step = walker.next();
+  }
+
   for (let index = 0; index < source.length; index += 1) {
     if (!mask[index] || escaped(source, index)) continue;
     if (source.startsWith('<!--', index)) {
@@ -261,8 +282,7 @@ export function relocateMarkdownLinks(
     } catch {
       return;
     }
-    const newRelative =
-      path.posix.relative(destinationDirectory, target) || path.posix.basename(target);
+    const newRelative = path.posix.relative(destinationDirectory, target) || '.';
     const rewritten = `${encodeDestination(newRelative)}${local.suffix}`;
     if (rewritten !== range.value)
       replacements.push({ start: range.start, end: range.end, text: rewritten });

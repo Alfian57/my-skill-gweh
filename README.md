@@ -18,15 +18,18 @@ Run the wizard inside the application directory. It detects source languages and
 my-skill-gweh init [path]
 my-skill-gweh update [path]
 my-skill-gweh update [path] --reconfigure
+my-skill-gweh skill enable mascot [path]
+my-skill-gweh skill disable mascot [path]
 my-skill-gweh doctor [path] --json
 my-skill-gweh list --json
+my-skill-gweh --version --verbose
 my-skill-gweh preset save personal
 my-skill-gweh preset list
 my-skill-gweh preset show personal
 my-skill-gweh preset remove personal
 ```
 
-`init` requires a project that has not been initialized. `update` uses its saved configuration; `--config file.json` explicitly supplies replacement choices. `--reconfigure` opens the wizard again. Run `--help` for all flags.
+`init` requires a project that has not been initialized. `update` uses its saved configuration; `--config file.json` explicitly supplies replacement choices. `--reconfigure` opens the wizard again. `skill enable|disable ID` changes one skill and uses the same preview, confirmation, and conflict flow as update. A plain update reports optional skills added since the project last reviewed the catalog, without enabling them. `--version --verbose` shows the running module path; plain `--version` remains the package version. Run `--help` for all flags.
 
 For scripts, provide the full configuration:
 
@@ -50,7 +53,7 @@ my-skill-gweh init ./application --config choices.json --non-interactive --json
 my-skill-gweh update ./application --non-interactive --json
 ```
 
-`--dry-run` lists changes without writing anything. In an interactive terminal it still asks configuration questions. `--json` with init/update requires `--non-interactive` and emits a single JSON report. Conflicts and partial results exit with status 1, including during dry-run. Choosing cancel in a conflict prompt leaves all files untouched; keyboard interruption exits with status 130. Invalid arguments and unsupported flag combinations fail before any writes.
+`--dry-run` lists changes without writing anything. In an interactive terminal it still asks configuration questions. `--json` with init/update requires `--non-interactive`; skill commands support `--json` with `--dry-run`. JSON output stays on stdout without spinner text; optional-skill notices go to stderr. Conflicts and partial results exit with status 1, including during dry-run. Choosing cancel in a conflict prompt leaves all files untouched; keyboard interruption exits with status 130. Invalid arguments and unsupported flag combinations fail before any writes.
 
 Generation JSON keeps the `changes` and `conflicts` fields and adds `conflictDetails` and `recovered`. `planned` groups proposed `writes`, `removals`, `backups`, and `metadata`; `written`, `removed`, and `backups` list operations that actually completed. Preview and blocked results leave those applied-operation lists empty. Status is `preview`, `applied`, `partial`, `blocked`, or `cancelled`; a partial result exits with status 1 and lists skipped paths.
 
@@ -64,14 +67,14 @@ Languages are detected from source file extensions: JavaScript (`.js`, `.jsx`, `
 
 ## Generated files and updates
 
-Documentation defaults to `ai-agent-docs`. Skill guides are grouped under `engineering/` and `application/`; project context and workflow live under `project/`. Each native agent skill contains only its metadata and a link to the canonical guide, so project-specific rules have one editable source. The generated layout is:
+Documentation defaults to `ai-agent-docs`. Selected skill guides are grouped under `engineering/` and `application/`; project context and workflow live under `project/`. Each native agent skill contains only its metadata and a link to the canonical guide, so project-specific rules have one editable source. The generated layout is:
 
 ```text
 ai-agent-docs/
 ├── README.md
-├── engineering/  # quality, docs, contracts, testing, dependencies, zero-any
-├── application/  # routes, forms, ui-size, ui-tests, accessibility
-└── project/      # context.md, workflow.md
+├── engineering/  # selected engineering skills
+├── application/  # selected UI, route, and mascot skills
+└── project/      # context.md, workflow.md; mascot.md after a mascot is selected
 ```
 
 The project context map uses recognized manifests, source extensions and up to three representative paths per area. It records declared command names without copying script bodies or running them, and it does not infer business behavior or application architecture. Next.js guidance records App Router, Pages Router, mixed, or unknown based on route entry files.
@@ -89,11 +92,13 @@ The project context map uses recognized manifests, source extensions and up to t
 
 Agent version and organization policies may affect discovery. Reload or restart the agent after generation if necessary. No global agent settings are changed, and installation does not run a hook that modifies project files.
 
+The optional `mascot` skill is never recommended automatically for any stack. Enable it with `my-skill-gweh skill enable mascot` or choose it in `update --reconfigure`. Its short guide prioritizes an existing identity in `<output>/project/mascot.md`; detailed four-concept creation is in `application/mascot-concepts.md` and is opened only for a new identity or explicit redesign. The agent waits for a choice, removes rejected concepts from that exploration, validates the four-view guide, and records the selected identity. Future mascot images must attach the guide as an image reference. Assets follow the project's existing image folder convention, with `assets/mascot/` as the fallback. Agents without image generation or image-reference support save prompts and expected input/output paths, then wait for generated files.
+
 Configuration lives in `.my-skill-gweh/config.json`; ownership fingerprints and generated guide baselines live in `.my-skill-gweh/manifest.json` and `.my-skill-gweh/baselines.json`. Commit these files alongside generated outputs. Baselines let updates merge independent edits to canonical guides. The CLI combines non-overlapping edits automatically and resolves overlapping sections one hunk at a time: keep the project text, use generated text, or keep both in project-then-generated order. A resolution is applied only while the reviewed file and generated snapshot remain unchanged. Older customized guides without a baseline require review. Generated YAML frontmatter stays at the beginning of native skill and rule files. New managed blocks include a content fingerprint so exact generated files can be recovered if the manifest is lost.
 
 Existing plain instruction files receive a marked block. Text outside that block is preserved exactly on update. Recovery skips nested repositories and nested projects with their own `.my-skill-gweh/config.json`; output configured inside a nested project is blocked, so run the CLI from that child project root. Recovery is bounded and reports truncation. Exact legacy agent pointers are recovered automatically. During flat-layout migration, developer notes outside the managed block move into the matching grouped guide and the old file is backed up. Customized output removed from the configuration prompts whether to retain it as a plain document under `<output>/retained/` or delete it after making a complete backup under `.my-skill-gweh/backups/`. Retained documents have generator markers removed and local CommonMark links rebased. Other conflicts offer keep-and-skip, backup-and-replace, or cancel; keep-and-skip is the default. Skipping applies other safe changes and reports a partial result. Non-interactive runs stop without writing when a conflict needs a decision. CommonMark parsing is used for local-link checks and retained-document link updates.
 
-Every destination, including metadata, is checked for symlinks and file/directory collisions before writing. Project inputs also avoid symlinks. A project lock records PID, host, and start time; `doctor` distinguishes active, stale, and unknown locks. Stale locks are not removed automatically: verify that the owner stopped before removing `.my-skill-gweh.lock`. Files are replaced individually using temporary files; ordinary write failures trigger rollback. This is not a crash-atomic filesystem transaction.
+Every destination, including metadata, is checked for symlinks and file/directory collisions before writing. Project inputs also avoid symlinks. A project lock records PID, host, and start time; `doctor` distinguishes active, stale, and unknown locks. Stale locks are not removed automatically: verify that the owner stopped before removing `.my-skill-gweh.lock`. Transactions recheck each file before changing it and avoid rolling back over a newer developer edit. Files are replaced individually using temporary files; ordinary write failures trigger rollback. This is not a crash-atomic filesystem transaction.
 
 `doctor` reads saved configuration, diagnoses missing or invalid state, checks expected files and ownership fingerprints, lock state, and local Markdown file references. It ignores code examples and accepts file or directory links. It never runs project tests/builds or claims that an agent loaded the skill. Missing files, orphaned state, conflicts, drift, lock problems, or invalid references produce status 1.
 

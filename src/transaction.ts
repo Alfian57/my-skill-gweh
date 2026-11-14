@@ -172,10 +172,16 @@ export async function applyChanges(
     for (const change of changes) {
       await beforeEachWrite?.(change.file);
       const file = await assertSafePath(root, change.file);
+      if ((await readOptional(file)) !== change.original) {
+        throw new Error(`File changed since preview: ${change.file}`);
+      }
       if (change.content === undefined) {
         await fs.unlink(file);
       } else {
         await createParents(root, path.dirname(file), created);
+        if ((await readOptional(await assertSafePath(root, change.file))) !== change.original) {
+          throw new Error(`File changed since preview: ${change.file}`);
+        }
         await assertSafePath(root, change.file);
         await replaceFile(root, change.file, change.content);
       }
@@ -185,6 +191,12 @@ export async function applyChanges(
     const failures: unknown[] = [];
     for (const change of applied.reverse()) {
       try {
+        const current = await readOptional(await assertSafePath(root, change.file));
+        if (current !== change.content) {
+          throw new Error(
+            `Rollback skipped because the file changed during generation: ${change.file}`,
+          );
+        }
         if (change.original === undefined) await fs.unlink(await assertSafePath(root, change.file));
         else await replaceFile(root, change.file, change.original);
       } catch (rollbackError) {

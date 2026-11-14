@@ -26,7 +26,15 @@ test('every selected skill renders detailed guidance and native agent instructio
     const nativeSkill = files[nativeSkillFile];
     assert.ok(guide, `${skill} guide exists`);
     assert.ok(nativeSkill, `${skill} native skill exists`);
-    assert.ok((guide.match(/^## /gmu) ?? []).length >= 2, `${skill} has detailed sections`);
+    assert.ok(
+      (guide.match(/^## /gmu) ?? []).length >= (skill === 'mascot' ? 1 : 2),
+      `${skill} has discoverable sections`,
+    );
+    if (skill === 'mascot')
+      assert.ok(
+        (files[`${config.output}/application/mascot-concepts.md`].match(/^## /gmu) ?? []).length >=
+          2,
+      );
     assert.match(guide, /^- /mu, `${skill} has actionable rules`);
     assert.match(nativeSkill, /Follow the project guide:|Ikuti panduan proyek:/u);
     assert.ok(
@@ -51,6 +59,94 @@ test('every selected skill renders detailed guidance and native agent instructio
     files[skillGuidePath(config.output, 'zero-any')],
     /no TypeScript files|tidak menemukan berkas TypeScript/u,
   );
+});
+
+test('mascot guidance localizes its full workflow and stays opt-in for custom output paths', async (t) => {
+  const root = await fixture(t);
+  const output = 'team docs/agent guides (#1)';
+  const absent = await render(root, { ...defaults(), output, agents: ['codex'] });
+  assert.equal(absent[skillGuidePath(output, 'mascot')], undefined);
+  assert.equal(absent['.agents/skills/my-skill-gweh-mascot/SKILL.md'], undefined);
+
+  const expected = {
+    en: [
+      'use that identity for poses and variations',
+      'attach the guide image as visual input',
+      'Start a new identity or redesign only when the developer asks',
+    ],
+    id: [
+      'gunakan identitas itu untuk pose dan variasi',
+      'lampirkan gambar guide sebagai input visual',
+      'Mulai identitas baru atau redesign hanya jika developer memintanya',
+    ],
+  };
+  for (const language of ['id', 'en']) {
+    const config = {
+      ...defaults(),
+      output,
+      docsLanguage: language,
+      agents: ['codex'],
+      skills: ['mascot'],
+    };
+    const files = await render(root, config);
+    const guide = files[skillGuidePath(output, 'mascot')];
+    const concepts = files[`${output}/application/mascot-concepts.md`];
+    const adapterPath = '.agents/skills/my-skill-gweh-mascot/SKILL.md';
+    const adapter = files[adapterPath];
+    assert.ok(guide);
+    assert.ok(concepts);
+    assert.ok(adapter);
+    for (const phrase of expected[language]) assert.ok(guide.includes(phrase), phrase);
+    assert.ok(
+      concepts.includes(language === 'en' ? 'four separate PNGs' : 'empat file PNG terpisah'),
+    );
+    assert.ok(
+      concepts.includes(
+        language === 'en'
+          ? 'without another approval prompt'
+          : 'tanpa meminta persetujuan tambahan',
+      ),
+    );
+    assert.ok(guide.length < 1_500, `Mascot entry guide should stay concise (${language})`);
+    assert.ok(adapter.includes(`(${localLink(adapterPath, skillGuidePath(output, 'mascot'))})`));
+    assert.match(files[`${output}/README.md`], /application\/mascot\.md/u);
+  }
+});
+
+test('turning off mascot guidance preserves project identity notes and image assets', async (t) => {
+  const root = await fixture(t);
+  const output = 'ai agent docs';
+  const enabled = {
+    ...defaults(),
+    output,
+    agents: ['codex'],
+    skills: ['quality', 'mascot'],
+  };
+  await generate(root, enabled);
+
+  const profile = `${output}/project/mascot.md`;
+  const asset = 'assets/mascot/run-1/guide.png';
+  await writeFile(root, profile, '# Project mascot\n\nActive reference is saved locally.\n');
+  await writeFile(root, asset, 'test reference image');
+  assert.equal(isHealthy(await doctor(root)), true);
+
+  const disabled = { ...enabled, skills: ['quality'] };
+  const result = await generate(root, disabled);
+  assert.equal(result.status, 'applied');
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(path.join(root, '.my-skill-gweh/config.json'), 'utf8')).skills,
+    ['quality'],
+  );
+  await assert.rejects(fs.access(path.join(root, skillGuidePath(output, 'mascot'))));
+  await assert.rejects(fs.access(path.join(root, '.agents/skills/my-skill-gweh-mascot/SKILL.md')));
+  await assert.rejects(fs.access(path.join(root, `${output}/application/mascot-concepts.md`)));
+  assert.equal(
+    await fs.readFile(path.join(root, profile), 'utf8'),
+    '# Project mascot\n\nActive reference is saved locally.\n',
+  );
+  assert.equal(await fs.readFile(path.join(root, asset), 'utf8'), 'test reference image');
+  assert.equal(isHealthy(await doctor(root)), true);
 });
 
 test('database migration policy is always available even when contracts is optional', async (t) => {

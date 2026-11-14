@@ -54,6 +54,10 @@ export const rules = {
     en: 'Verify keyboard navigation, visible focus and accessible control labels.',
     id: 'Periksa navigasi keyboard, focus terlihat, dan label kontrol aksesibel.',
   },
+  mascot: {
+    en: 'Design a project mascot and keep future mascot images consistent with its visual reference.',
+    id: 'Rancang maskot proyek dan jaga konsistensi gambar maskot berikutnya dengan panduan visualnya.',
+  },
   dependencies: {
     en: 'Explain why a new dependency is needed before adding it; prefer existing suitable utilities.',
     id: 'Jelaskan kebutuhan dependency baru sebelum menambahkannya; utamakan utilitas yang sudah sesuai.',
@@ -62,6 +66,28 @@ export const rules = {
 
 export type Skill = keyof typeof rules;
 export const skillIds = Object.keys(rules) as Skill[];
+
+/** Increment when a new optional skill becomes available to existing projects. */
+export const SKILL_CATALOG_REVISION = 1;
+
+const skillIntroducedAt: Record<Skill, number> = {
+  quality: 0,
+  docs: 0,
+  contracts: 0,
+  testing: 0,
+  'ui-size': 0,
+  'zero-any': 0,
+  routes: 0,
+  forms: 0,
+  'ui-tests': 0,
+  accessibility: 0,
+  mascot: 1,
+  dependencies: 0,
+};
+
+export function skillsIntroducedAfter(revision: number): Skill[] {
+  return skillIds.filter((skill) => skillIntroducedAt[skill] > revision);
+}
 
 // Preserve the original core API while consumers move to named language keys.
 export const catalog = Object.fromEntries(

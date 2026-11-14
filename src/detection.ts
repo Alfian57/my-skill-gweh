@@ -3,6 +3,8 @@ import path from 'node:path';
 import { isFileError, isRecord } from './errors.js';
 import {
   createScanBudget,
+  isIgnoredProjectDirectory,
+  hasNestedProjectBoundary,
   PROJECT_SCAN_DEPTH_LIMIT,
   PROJECT_SCAN_ENTRY_LIMIT,
   readBoundedDirectory,
@@ -10,6 +12,7 @@ import {
   scanDiagnostics,
   type ScanBudget,
 } from './project-scan.js';
+import { safe } from './filesystem.js';
 import { stackTechnologies, type StackTechnology } from './stack.js';
 
 export interface Detection {
@@ -40,25 +43,6 @@ function managerFromPackageJson(value: unknown): Detection['packageManager'] | u
   return match?.[1] as Detection['packageManager'];
 }
 
-const ignoredDirectories = new Set([
-  '.git',
-  '.my-skill-gweh',
-  'node_modules',
-  'vendor',
-  'storage',
-  'dist',
-  'build',
-  '.next',
-  'coverage',
-  '.turbo',
-  '.cache',
-  '.output',
-  '.svelte-kit',
-  '.vercel',
-  'out',
-  'target',
-]);
-
 const sourceLanguages: Readonly<Record<string, StackTechnology>> = {
   '.js': 'javascript',
   '.jsx': 'javascript',
@@ -78,13 +62,14 @@ async function scanSources(
 ): Promise<{ languages: Set<StackTechnology>; extensions: Set<string>; uiEvidence: boolean }> {
   const languages = new Set<StackTechnology>();
   const extensions = new Set<string>();
-  const pending: Array<{ directory: string; depth: number }> = [{ directory: root, depth: 0 }];
+  const pending: Array<{ relative: string; depth: number }> = [{ relative: '', depth: 0 }];
   let uiEvidence = false;
 
   while (pending.length && budget.visited < PROJECT_SCAN_ENTRY_LIMIT && !budget.truncated) {
     const current = pending.pop();
     if (!current) continue;
-    const { directory, depth } = current;
+    const { relative, depth } = current;
+    const directory = relative ? safe(root, relative) : root;
     let entries;
     try {
       entries = await readBoundedDirectory(directory, budget);
@@ -103,9 +88,11 @@ async function scanSources(
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        if (!ignoredDirectories.has(entry.name.toLowerCase())) {
+        if (!isIgnoredProjectDirectory(entry.name)) {
+          const child = current.relative ? `${current.relative}/${entry.name}` : entry.name;
           if (depth >= PROJECT_SCAN_DEPTH_LIMIT) budget.truncated = true;
-          else pending.push({ directory: path.join(directory, entry.name), depth: depth + 1 });
+          else if (!(await hasNestedProjectBoundary(root, child)))
+            pending.push({ relative: child, depth: depth + 1 });
         }
         continue;
       }

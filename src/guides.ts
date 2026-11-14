@@ -20,7 +20,6 @@ export interface GuideTemplate {
     language?: string;
     stacks?: string[];
   };
-  checklist: Localized[];
 }
 
 export const guides: Record<Skill, GuideTemplate> = {
@@ -80,20 +79,6 @@ export const guides: Record<Skill, GuideTemplate> = {
         ],
       },
     ],
-    checklist: [
-      {
-        id: 'Perubahan memakai pola terdekat yang sudah ada atau menjelaskan alasan penyimpangannya.',
-        en: 'The change follows the nearest established pattern or explains why it differs.',
-      },
-      {
-        id: 'Modul baru tidak menambah abstraksi tanpa kebutuhan yang terverifikasi.',
-        en: 'New modules do not add abstractions without a verified need.',
-      },
-      {
-        id: 'Error, input runtime, dan data sensitif ditangani secara eksplisit.',
-        en: 'Errors, runtime input, and sensitive data are handled explicitly.',
-      },
-    ],
   },
   docs: {
     sections: [
@@ -151,20 +136,6 @@ export const guides: Record<Skill, GuideTemplate> = {
             en: 'A setup-command change updates onboarding steps and required environment information.',
           },
         ],
-      },
-    ],
-    checklist: [
-      {
-        id: 'Dokumen yang diperbarui memiliki pemilik dan status fakta yang jelas.',
-        en: 'Updated documentation has a clear owner and fact status.',
-      },
-      {
-        id: 'Link relatif dan contoh diperiksa terhadap source terkini.',
-        en: 'Relative links and examples are checked against current source.',
-      },
-      {
-        id: 'Tidak ada secret atau klaim fitur yang tidak terbukti.',
-        en: 'There are no secrets or unverified feature claims.',
       },
     ],
   },
@@ -227,20 +198,6 @@ export const guides: Record<Skill, GuideTemplate> = {
             en: 'Add tests for allowed access, denied access, and data that must not leak.',
           },
         ],
-      },
-    ],
-    checklist: [
-      {
-        id: 'Semua pemanggil dan konsumen kontrak sudah dicari.',
-        en: 'All callers and contract consumers have been identified.',
-      },
-      {
-        id: 'Batas authorization, ownership, dan privasi dipertahankan.',
-        en: 'Authorization, ownership, and privacy boundaries are preserved.',
-      },
-      {
-        id: 'Tes regresi mencakup sukses, penolakan, dan input tidak valid.',
-        en: 'Regression tests cover success, denial, and invalid input.',
       },
     ],
   },
@@ -306,20 +263,6 @@ export const guides: Record<Skill, GuideTemplate> = {
         ],
       },
     ],
-    checklist: [
-      {
-        id: 'Tes baru memeriksa perilaku yang berubah, bukan sekadar eksekusi tanpa assertion.',
-        en: 'New tests verify changed behavior, not just execution without assertions.',
-      },
-      {
-        id: 'Command dan hasil verifikasi dicatat secara akurat.',
-        en: 'Verification commands and results are reported accurately.',
-      },
-      {
-        id: 'Tes terkait tetap ada dan tidak dilemahkan.',
-        en: 'Related tests remain present and are not weakened.',
-      },
-    ],
   },
   'ui-size': {
     sections: [
@@ -356,20 +299,6 @@ export const guides: Record<Skill, GuideTemplate> = {
             en: 'Keep extraction scoped to the active task and ensure behavior tests still protect the interaction.',
           },
         ],
-      },
-    ],
-    checklist: [
-      {
-        id: 'Ukuran file dipakai sebagai sinyal review, bukan aturan mekanis.',
-        en: 'File size is used as a review signal, not a mechanical rule.',
-      },
-      {
-        id: 'Setiap ekstraksi memiliki batas tanggung jawab yang bisa dijelaskan.',
-        en: 'Each extraction has an explainable responsibility boundary.',
-      },
-      {
-        id: 'Perilaku UI tetap diuji setelah pemisahan.',
-        en: 'UI behavior remains tested after extraction.',
       },
     ],
   },
@@ -430,20 +359,6 @@ export const guides: Record<Skill, GuideTemplate> = {
   return undefined;
 }`,
     },
-    checklist: [
-      {
-        id: 'Tidak ada `any` baru atau suppression tipe tanpa alasan terverifikasi.',
-        en: 'No new `any` or type suppression was added without a verified reason.',
-      },
-      {
-        id: 'Input runtime divalidasi sebelum dipercaya sebagai tipe domain.',
-        en: 'Runtime input is validated before it is trusted as a domain type.',
-      },
-      {
-        id: 'Jika TypeScript tidak terdeteksi, aturan ini hanya berlaku pada file TypeScript yang memang disentuh.',
-        en: 'If TypeScript was not detected, this guidance applies only to TypeScript files actually touched.',
-      },
-    ],
   },
   routes: {
     sections: [
@@ -495,20 +410,6 @@ export const guides: Record<Skill, GuideTemplate> = {
 
 route('orders.show', $order);`,
     },
-    checklist: [
-      {
-        id: 'Definisi route dan middleware terkait telah ditinjau.',
-        en: 'The route definition and related middleware were reviewed.',
-      },
-      {
-        id: 'Link internal memakai mekanisme route repository yang sudah ada.',
-        en: 'Internal links use the repository’s existing route mechanism.',
-      },
-      {
-        id: 'Tes memverifikasi respons dan authorization, bukan hanya status sukses.',
-        en: 'Tests verify response behavior and authorization, not only a success status.',
-      },
-    ],
   },
   forms: {
     sections: [
@@ -562,20 +463,6 @@ route('orders.show', $order);`,
     @error('name') <p role="alert">{{ $message }}</p> @enderror
 </form>`,
     },
-    checklist: [
-      {
-        id: 'Label, required/optional, dan instruksi terhubung ke kontrol form.',
-        en: 'Labels, required/optional status, and instructions are associated with each control.',
-      },
-      {
-        id: 'Loading, error, empty, dan sukses ditampilkan sesuai perilaku operasi.',
-        en: 'Loading, error, empty, and success states reflect the operation.',
-      },
-      {
-        id: 'Validasi server dan authorization tidak hanya mengandalkan client.',
-        en: 'Server validation and authorization do not rely on the client alone.',
-      },
-    ],
   },
   'ui-tests': {
     sections: [
@@ -616,20 +503,6 @@ route('orders.show', $order);`,
             en: 'Follow the project’s existing test location and runner; do not add a second runner without need.',
           },
         ],
-      },
-    ],
-    checklist: [
-      {
-        id: 'Assertion memeriksa hasil yang bermakna bagi pengguna.',
-        en: 'Assertions check outcomes meaningful to users.',
-      },
-      {
-        id: 'Tes tidak bergantung pada timing, network nyata, atau selector rapuh.',
-        en: 'Tests do not depend on timing, live network, or brittle selectors.',
-      },
-      {
-        id: 'Kasus sukses, error, dan state kosong relevan telah dipertimbangkan.',
-        en: 'Relevant success, error, and empty states have been considered.',
       },
     ],
   },
@@ -678,18 +551,29 @@ route('orders.show', $order);`,
         ],
       },
     ],
-    checklist: [
+  },
+  mascot: {
+    sections: [
       {
-        id: 'Form dan kontrol diuji dengan keyboard serta nama aksesibel.',
-        en: 'Forms and controls are checked for keyboard use and accessible names.',
-      },
-      {
-        id: 'Fokus terlihat setelah navigasi atau dialog dibuka/ditutup.',
-        en: 'Focus remains visible after navigation or dialogs open/close.',
-      },
-      {
-        id: 'Error dan status penting tidak hanya disampaikan lewat warna.',
-        en: 'Errors and important status are not conveyed only by color.',
+        title: { id: 'Gunakan identitas maskot proyek', en: 'Use the project mascot identity' },
+        bullets: [
+          {
+            id: 'Periksa `<output>/project/mascot.md`. Jika profil ada, gunakan identitas itu untuk pose dan variasi; baca profil dan lampirkan gambar guide sebagai input visual. Menyebut path dalam prompt saja tidak cukup.',
+            en: 'Check `<output>/project/mascot.md`. If a profile exists, use that identity for poses and variations; read it and attach the guide image as visual input. Mentioning its path in a prompt is not enough.',
+          },
+          {
+            id: 'Pertahankan siluet, wajah, palet, logo, dan aksesori khas. Ubah hanya pose atau properti yang diminta; tanyakan jika permintaan bertentangan dengan identitas yang tercatat.',
+            en: 'Preserve the silhouette, face, palette, logo, and signature accessories. Change only the requested pose or prop; ask if the request conflicts with the recorded identity.',
+          },
+          {
+            id: 'Mulai identitas baru atau redesign hanya jika developer memintanya. Untuk alur itu, baca [alur konsep maskot](mascot-concepts.md) sebelum membuat gambar.',
+            en: 'Start a new identity or redesign only when the developer asks. For that workflow, read the [mascot concept workflow](mascot-concepts.md) before generating images.',
+          },
+          {
+            id: 'Jangan mengklaim aset sudah dibuat atau guide aktif sebelum file benar-benar tersedia dan dapat diperiksa.',
+            en: 'Do not claim an asset was created or a guide is active until the file exists and can be inspected.',
+          },
+        ],
       },
     ],
   },
@@ -734,26 +618,92 @@ route('orders.show', $order);`,
         ],
       },
     ],
-    checklist: [
-      {
-        id: 'Kebutuhan dependency dan alternatif tercatat.',
-        en: 'The dependency need and alternatives are documented.',
-      },
-      {
-        id: 'Versi runtime/lockfile serta license sudah diverifikasi.',
-        en: 'Runtime/lockfile versions and the license have been checked.',
-      },
-      {
-        id: 'Manifest dan lockfile berubah konsisten.',
-        en: 'The manifest and lockfile changes are consistent.',
-      },
-    ],
   },
 };
 
 export function localized(value: Localized, language: Language): string {
   return value[language];
 }
+
+export const mascotConceptSections: GuideSection[] = [
+  {
+    title: {
+      id: 'Pahami brief dan siapkan lokasi',
+      en: 'Understand the brief and choose a location',
+    },
+    bullets: [
+      {
+        id: 'Periksa website, logo, palet, ilustrasi, dan tujuan produk. Jangan mengarang identitas brand; tanyakan hanya detail yang tidak bisa ditemukan dari repository.',
+        en: 'Inspect the website, logo, palette, illustrations, and product purpose. Do not invent brand identity; ask only for details unavailable in the repository.',
+      },
+      {
+        id: 'Simpan aset di folder gambar proyek yang sudah digunakan. Jika belum ada konvensi, gunakan `assets/mascot`; jika beberapa lokasi sama-sama cocok, tanyakan.',
+        en: 'Use the project’s existing image asset folder. If no convention exists, use `assets/mascot`; ask if multiple locations fit equally well.',
+      },
+    ],
+  },
+  {
+    title: { id: 'Buat dan bandingkan empat konsep', en: 'Create and compare four concepts' },
+    bullets: [
+      {
+        id: 'Buat empat file PNG terpisah dengan siluet atau karakter berbeda, gaya ilustrasi konsisten, dan aksesori unik yang benar-benar terkait produk atau logo yang tersedia.',
+        en: 'Create four separate PNGs with distinct silhouettes or characters, a consistent illustration style, and a signature accessory grounded in the product or available logo.',
+      },
+      {
+        id: 'Gunakan folder baru `<mascot-root>/<run-id>/` dan subfolder per putaran (`round-01/01.png` hingga `04.png`). Catat deskripsi dan path yang benar di `selection.md` sebelum melaporkannya.',
+        en: 'Use a new `<mascot-root>/<run-id>/` folder and one subfolder per round (`round-01/01.png` through `04.png`). Record accurate descriptions and paths in `selection.md` before reporting them.',
+      },
+      {
+        id: 'Tampilkan empat kandidat beserta nomor, ringkasan, dan path. Tunggu pilihan atau permintaan putaran baru; kandidat dari putaran sebelumnya tetap dapat dipilih.',
+        en: 'Show all four candidates with a number, summary, and path. Wait for a choice or another round; earlier candidates remain selectable.',
+      },
+    ],
+  },
+  {
+    title: {
+      id: 'Tetapkan pilihan dan buat guide',
+      en: 'Finalize the choice and create the guide',
+    },
+    bullets: [
+      {
+        id: 'Pindahkan pilihan ke `selected.png`. Hapus hanya kandidat eksplorasi yang tidak dipilih; perbarui `selection.md` agar tidak menyisakan path aset yang sudah dihapus. Jangan menghapus aset lama atau aset yang dipakai di tempat lain.',
+        en: 'Move the chosen image to `selected.png`. Delete only unselected candidates from this exploration and update `selection.md` so it has no paths to deleted files. Never remove older or otherwise-used assets.',
+      },
+      {
+        id: 'Lampirkan `selected.png` ke tool generasi. Buat satu gambar 2×2 full-body ortografis berlatar polos: depan kiri atas, belakang kanan atas, sisi kanan maskot kiri bawah, sisi kiri maskot kanan bawah.',
+        en: 'Attach `selected.png` to the image tool. Create one full-body orthographic 2×2 sheet on a plain background: front top-left, back top-right, mascot’s right side bottom-left, left side bottom-right.',
+      },
+      {
+        id: 'Periksa keempat tampak: identitas, proporsi, palet, logo, dan aksesori harus konsisten serta setiap sisi terlihat jelas. Jika gagal, perbaiki atau buat ulang; jangan aktifkan guide yang belum valid.',
+        en: 'Inspect all four views for consistent identity, proportions, palette, logo, and accessories, and confirm each side is clear. Repair or regenerate failures; do not activate an invalid guide.',
+      },
+      {
+        id: 'Simpan sebagai `guide.png`. Jika lolos pemeriksaan, aktifkan otomatis tanpa meminta persetujuan tambahan.',
+        en: 'Save as `guide.png`. Once it passes inspection, activate it automatically without another approval prompt.',
+      },
+    ],
+  },
+  {
+    title: {
+      id: 'Simpan identitas dan tangani keterbatasan tool',
+      en: 'Record identity and handle tool limitations',
+    },
+    bullets: [
+      {
+        id: 'Buat atau perbarui `<output>/project/mascot.md` dengan ciri tetap, warna, aksesori, urutan panel, dan tautan gambar relatif yang valid ke `selected.png` serta `guide.png`. Tambahkan tautan dari panduan kanonis di luar managed block setelah file ada.',
+        en: 'Create or update `<output>/project/mascot.md` with fixed traits, colors, accessories, panel order, and valid relative image links to `selected.png` and `guide.png`. Link it from the canonical guide outside its managed block only after the file exists.',
+      },
+      {
+        id: 'Untuk variasi berikutnya, baca profil dan lampirkan `guide.png` sebagai input gambar. Ubah hanya pose atau properti yang diminta.',
+        en: 'For later variations, read the profile and attach `guide.png` as an image input. Change only the requested pose or prop.',
+      },
+      {
+        id: 'Pastikan tool yang tersedia mendukung generasi gambar dan lampiran referensi; jangan menebak berdasarkan nama agent. Jika tidak, simpan brief dan prompt di `<mascot-root>/<run-id>/prompts.md`, termasuk semua path gambar yang harus dilampirkan sebagai input. Beri tahu developer dan tunggu file sebelum melanjutkan.',
+        en: 'Confirm the available tools support image generation and reference attachments; do not infer capability from the agent name. Otherwise save the brief and prompts in `<mascot-root>/<run-id>/prompts.md`, including every image path that must be attached as input. Tell the developer and wait for files before resuming.',
+      },
+    ],
+  },
+];
 
 const laravelGuidance: Partial<Record<Skill, Localized[]>> = {
   quality: [
