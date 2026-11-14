@@ -17,6 +17,11 @@ const source = {
   repository: 'Alfian57/my-skill-gweh',
 };
 
+test('Release Please generated changelog is excluded from formatter checks', async () => {
+  const ignore = await readFile(new URL('../.prettierignore', import.meta.url), 'utf8');
+  assert.match(ignore, /^CHANGELOG\.md$/mu);
+});
+
 test('Release Please configuration matches the package and current manifest baseline', () => {
   assert.equal(releaseConfig['release-type'], 'node');
   assert.equal(releaseConfig.packages['.']['package-name'], metadata.name);
