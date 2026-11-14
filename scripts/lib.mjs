@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
 
-export async function packageMetadata() {
-  return JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+export async function packageMetadata(packageRoot = root) {
+  return JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'));
 }
 
 export function runNode(args, options = {}) {

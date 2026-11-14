@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { packageMetadata } from '../scripts/lib.mjs';
 import { releaseInfo } from '../scripts/release-info.mjs';
 import { verifyPublishedVersion } from '../scripts/verify-publication.mjs';
 
@@ -12,15 +15,28 @@ const releaseManifest = JSON.parse(
   await readFile(new URL('../.release-please-manifest.json', import.meta.url), 'utf8'),
 );
 const source = {
-  tag: `v${metadata.version}`,
+  tag: `${metadata.name}-v${metadata.version}`,
   refType: 'tag',
   repository: 'Alfian57/my-skill-gweh',
 };
 
+test('Release Please generated changelog is excluded from formatter checks', async () => {
+  const ignore = await readFile(new URL('../.prettierignore', import.meta.url), 'utf8');
+  assert.match(ignore, /^CHANGELOG\.md$/mu);
+});
+
 test('Release Please configuration matches the package and current manifest baseline', () => {
   assert.equal(releaseConfig['release-type'], 'node');
   assert.equal(releaseConfig.packages['.']['package-name'], metadata.name);
+  assert.equal(releaseConfig['include-component-in-tag'], true);
   assert.equal(releaseManifest['.'], metadata.version);
+});
+
+test('release verification can read package metadata from a selected immutable tag checkout', async (t) => {
+  const packageRoot = await mkdtemp(path.join(os.tmpdir(), 'my-skill-release-source-'));
+  t.after(() => rm(packageRoot, { recursive: true, force: true }));
+  await writeFile(path.join(packageRoot, 'package.json'), '{"name":"tagged-version"}\n');
+  assert.deepEqual(await packageMetadata(packageRoot), { name: 'tagged-version' });
 });
 
 test('local npm version and release scripts are removed', () => {
@@ -38,6 +54,8 @@ test('release workflow runs on main pushes and manual recovery, not tag pushes',
   ).replace(/\r\n/gu, '\n');
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
   assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /release_tag:\n\s+description: Existing Release Please tag/u);
+  assert.match(workflow, /PACKAGE_ROOT: \$\{\{ github\.workspace \}\}\/release-source/u);
   assert.doesNotMatch(workflow, /tags:\s*\['v\*'\]/u);
   assert.match(workflow, /actions\/create-github-app-token@/u);
   assert.match(workflow, /googleapis\/release-please-action@/u);
@@ -62,12 +80,13 @@ test('stable release uses latest only for the exact configured repository and ve
 
 test('prerelease publication does not replace latest', () => {
   const beta = { ...metadata, version: '0.2.0-beta.1' };
-  assert.equal(releaseInfo(beta, { ...source, tag: 'v0.2.0-beta.1' }).distTag, 'next');
+  assert.equal(releaseInfo(beta, { ...source, tag: `${beta.name}-v0.2.0-beta.1` }).distTag, 'next');
 });
 
 for (const [label, override] of [
   ['a branch', { refType: 'branch' }],
-  ['a version mismatch', { tag: 'v9.9.9' }],
+  ['an unprefixed tag', { tag: `v${metadata.version}` }],
+  ['a version mismatch', { tag: `${metadata.name}-v9.9.9` }],
   ['a fork', { repository: 'SomeoneElse/my-skill-gweh' }],
 ]) {
   test(`release guard rejects ${label}`, () => {
@@ -92,7 +111,7 @@ for (const [label, override] of [
         { ...metadata, ...override },
         {
           ...source,
-          tag: `v${override.version ?? metadata.version}`,
+          tag: `${metadata.name}-v${override.version ?? metadata.version}`,
         },
       ),
     );
