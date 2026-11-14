@@ -33,10 +33,9 @@ test('local npm version and release scripts are removed', () => {
 });
 
 test('release workflow runs on main pushes and manual recovery, not tag pushes', async () => {
-  const workflow = await readFile(
-    new URL('../.github/workflows/publish.yml', import.meta.url),
-    'utf8',
-  );
+  const workflow = (
+    await readFile(new URL('../.github/workflows/publish.yml', import.meta.url), 'utf8')
+  ).replace(/\r\n/gu, '\n');
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
   assert.match(workflow, /workflow_dispatch:/u);
   assert.doesNotMatch(workflow, /tags:\s*\['v\*'\]/u);
@@ -48,7 +47,9 @@ test('release workflow runs on main pushes and manual recovery, not tag pushes',
 });
 
 test('CI exposes a required gate for pull requests and reusable recovery checks', async () => {
-  const workflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const workflow = (
+    await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  ).replace(/\r\n/gu, '\n');
   assert.match(workflow, /pull_request:\n\s+branches: \[main\]/u);
   assert.match(workflow, /workflow_call:/u);
   assert.match(workflow, /name: CI gate/u);
