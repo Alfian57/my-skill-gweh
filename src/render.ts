@@ -179,7 +179,7 @@ function nativeSkillMarkdown(file: string, config: Config): string {
   const english = config.docsLanguage === 'en';
   const contextLink = localLink(file, projectGuidePath(config.output, 'context'));
   const intro = english
-    ? `Use selected rules relevant to the task. Read [project context](${contextLink}), local agent instructions, and linked docs. Apply stack notes only when the project stack matches; otherwise follow local patterns and installed-version docs.`
+    ? `Use relevant selected rules. Read [project context](${contextLink}), local agent instructions, and linked docs. Apply stack notes only when the project stack matches; otherwise follow local patterns and installed-version docs.`
     : `Gunakan aturan terpilih yang sesuai tugas. Baca [konteks proyek](${contextLink}), instruksi agent lokal, dan dokumen tertaut. Terapkan catatan stack hanya jika cocok dengan stack proyek; jika tidak, ikuti pola lokal dan dokumentasi versi terpasang.`;
   return [
     `# ${english ? 'Selected project skills' : 'Skill proyek pilihan'}`,
