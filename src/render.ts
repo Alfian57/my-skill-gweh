@@ -179,8 +179,8 @@ function nativeSkillMarkdown(file: string, config: Config): string {
   const english = config.docsLanguage === 'en';
   const contextLink = localLink(file, projectGuidePath(config.output, 'context'));
   const intro = english
-    ? `Use relevant selected sections. Read [project context](${contextLink}), local agent instructions, and their relevant linked docs first. Apply stack notes only when the project stack matches; otherwise inspect local patterns and installed-version docs.`
-    : `Gunakan bagian terpilih yang relevan. Baca [konteks proyek](${contextLink}), instruksi agent lokal, dan dokumen relevan yang ditautkannya. Terapkan catatan stack hanya jika cocok dengan stack proyek; jika tidak, periksa pola lokal dan dokumentasi versi terpasang.`;
+    ? `Use selected rules relevant to the task. Read [project context](${contextLink}), local agent instructions, and linked docs. Apply stack notes only when the project stack matches; otherwise follow local patterns and installed-version docs.`
+    : `Gunakan aturan terpilih yang sesuai tugas. Baca [konteks proyek](${contextLink}), instruksi agent lokal, dan dokumen tertaut. Terapkan catatan stack hanya jika cocok dengan stack proyek; jika tidak, ikuti pola lokal dan dokumentasi versi terpasang.`;
   return [
     `# ${english ? 'Selected project skills' : 'Skill proyek pilihan'}`,
     intro,
@@ -430,8 +430,8 @@ export function renderDocuments(
   };
   const pointer = (file: string): string =>
     english
-      ? `Start with the [index](${localLink(file, indexFile)}). Before editing code, read the [my-skill-gweh skill](${localLink(file, `${nativeSkillDirectoryForInstruction(file)}/my-skill-gweh/SKILL.md`)}) and follow its matching section. Read only the relevant skill guide linked from that section. Open the [project workflow](${localLink(file, workflowFile)}) before running checks or changing Git state, and follow more specific repository instructions. For database work, ask whether production may be reset: if yes, edit existing migrations; if no, add a data-preserving migration.\n`
-      : `Mulai dari [index](${localLink(file, indexFile)}). Sebelum mengubah kode, baca [skill my-skill-gweh](${localLink(file, `${nativeSkillDirectoryForInstruction(file)}/my-skill-gweh/SKILL.md`)}) dan ikuti bagian yang sesuai. Baca hanya panduan skill yang ditautkan pada bagian tersebut. Buka [workflow proyek](${localLink(file, workflowFile)}) sebelum menjalankan pemeriksaan atau mengubah state Git, lalu ikuti instruksi repository yang lebih spesifik. Untuk tugas database, tanyakan apakah production boleh di-fresh: jika boleh, edit migrasi yang ada; jika tidak, tambahkan migrasi yang menjaga data.\n`;
+      ? `Start with the [index](${localLink(file, indexFile)}). Before editing code, read the [my-skill-gweh skill](${localLink(file, `${nativeSkillDirectoryForInstruction(file)}/my-skill-gweh/SKILL.md`)}) and follow its matching section; read only the relevant skill guide linked from that section. Open the [project workflow](${localLink(file, workflowFile)}) before running checks or changing Git state, and follow more specific repository instructions. For database work, ask whether production may be reset: if yes, edit existing migrations; if no, add a data-preserving migration.\n`
+      : `Mulai dari [index](${localLink(file, indexFile)}). Sebelum mengubah kode, baca [skill my-skill-gweh](${localLink(file, `${nativeSkillDirectoryForInstruction(file)}/my-skill-gweh/SKILL.md`)}) dan ikuti bagian yang sesuai; baca hanya panduan skill yang ditautkan pada bagian tersebut. Buka [workflow proyek](${localLink(file, workflowFile)}) sebelum menjalankan pemeriksaan atau mengubah state Git, lalu ikuti instruksi repository yang lebih spesifik. Untuk tugas database, tanyakan apakah production boleh di-fresh: jika boleh, edit migrasi yang ada; jika tidak, tambahkan migrasi yang menjaga data.\n`;
 
   documents[indexFile] = {
     body:
