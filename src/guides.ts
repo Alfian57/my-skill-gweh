@@ -870,7 +870,12 @@ export function contextualGuideSections(
       en: 'The current source scan found no TypeScript files; apply this guidance only to TypeScript files actually added or changed.',
     });
   }
-  if (!notes.length) return [];
+  if (!notes.length) {
+    notes.push({
+      id: 'Belum ada catatan adaptasi khusus untuk stack ini. Ikuti aturan umum di panduan, periksa manifest, instruksi proyek, dan file sejenis, serta gunakan dokumentasi versi yang terpasang. Jangan menyalin konvensi dari framework lain.',
+      en: 'No stack-specific adaptation is included here. Follow the framework-neutral rules, inspect manifests, project instructions, and neighboring files, and use documentation for the installed version. Do not transfer conventions from another framework.',
+    });
+  }
   return [
     {
       title: {

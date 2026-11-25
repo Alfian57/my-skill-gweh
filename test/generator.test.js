@@ -28,7 +28,7 @@ test('native skills and editor rules start with discoverable frontmatter', async
     (file) =>
       file.endsWith('/SKILL.md') || file.endsWith('.mdc') || file.startsWith('.windsurf/rules/'),
   );
-  assert.ok(metadataFiles.length > 10);
+  assert.ok(metadataFiles.length >= 6);
   for (const file of metadataFiles) {
     assert.ok(files[file].startsWith('---\n'), file);
     assert.ok(files[file].indexOf('\n---\n') < files[file].indexOf(BEGIN_MARKER), file);
@@ -61,7 +61,7 @@ test('legacy files migrate only after old fingerprints verify ownership', async 
   assert.deepEqual(result.conflicts, []);
   assert.ok(
     (
-      await fs.readFile(path.join(root, '.agents/skills/my-skill-gweh-quality/SKILL.md'), 'utf8')
+      await fs.readFile(path.join(root, '.agents/skills/my-skill-gweh/SKILL.md'), 'utf8')
     ).startsWith('---\n'),
   );
   assert.deepEqual((await generate(root, config, true)).changes, []);
@@ -499,21 +499,69 @@ test('deselected skills remove only verified managed outputs', async (t) => {
   const plan = await planGeneration(root, next);
   assert.deepEqual(plan.conflicts, []);
   assert.ok(plan.removals.some(({ file }) => file === skillGuidePath(initial.output, 'contracts')));
-  assert.ok(
-    plan.removals.some(({ file }) => file === '.agents/skills/my-skill-gweh-contracts/SKILL.md'),
-  );
+  assert.ok(!plan.removals.some(({ file }) => file === '.agents/skills/my-skill-gweh/SKILL.md'));
   const result = await commitGeneration(plan);
   assert.equal(result.status, 'applied');
   assert.ok(result.removed.includes(skillGuidePath(initial.output, 'contracts')));
   await assert.rejects(fs.access(path.join(root, skillGuidePath(initial.output, 'contracts'))));
+  const native = await fs.readFile(
+    path.join(root, '.agents/skills/my-skill-gweh/SKILL.md'),
+    'utf8',
+  );
+  assert.doesNotMatch(native, /^## contracts$/mu);
 });
 
-test('edited obsolete output is preserved when skipped while other outputs update', async (t) => {
+test('updates remove prior per-skill native files when their ownership is verified', async (t) => {
+  const root = await fixture(t);
+  const config = { ...defaults(), agents: ['codex'] };
+  await generate(root, config);
+  const stale = '.agents/skills/my-skill-gweh-contracts/SKILL.md';
+  const legacy = replaceManagedContent(
+    undefined,
+    {
+      frontmatter:
+        '---\nname: my-skill-gweh-contracts\ndescription: Legacy contracts skill.\n---\n',
+      body: `# contracts\n\nFollow the project guide: [contracts](${localLink(stale, skillGuidePath(config.output, 'contracts'))})`,
+    },
+    undefined,
+  );
+  assert.ok(legacy);
+  await fs.mkdir(path.dirname(path.join(root, stale)), { recursive: true });
+  await fs.writeFile(path.join(root, stale), legacy.content);
+  const manifest = JSON.parse(await fs.readFile(path.join(root, MANIFEST_PATH), 'utf8'));
+  manifest[stale] = legacy.fingerprint;
+  await writeJson(root, MANIFEST_PATH, manifest);
+
+  const plan = await planGeneration(root, config);
+  assert.deepEqual(plan.conflicts, []);
+  assert.ok(plan.removals.some(({ file }) => file === stale));
+  const result = await commitGeneration(plan);
+  assert.equal(result.status, 'applied');
+  await assert.rejects(fs.access(path.join(root, stale)));
+  assert.ok(await fs.readFile(path.join(root, '.agents/skills/my-skill-gweh/SKILL.md'), 'utf8'));
+});
+
+test('edited obsolete native skill is preserved when skipped while other outputs update', async (t) => {
   const root = await fixture(t);
   const initial = { ...defaults(), agents: ['codex'] };
   await generate(root, initial);
   const stale = '.agents/skills/my-skill-gweh-contracts/SKILL.md';
   const stalePath = path.join(root, stale);
+  const legacy = replaceManagedContent(
+    undefined,
+    {
+      frontmatter:
+        '---\nname: my-skill-gweh-contracts\ndescription: Legacy contracts skill.\n---\n',
+      body: `# contracts\n\nFollow the project guide: [contracts](${localLink(stale, skillGuidePath(initial.output, 'contracts'))})`,
+    },
+    undefined,
+  );
+  assert.ok(legacy);
+  await fs.mkdir(path.dirname(stalePath), { recursive: true });
+  await fs.writeFile(stalePath, legacy.content);
+  const manifest = JSON.parse(await fs.readFile(path.join(root, MANIFEST_PATH), 'utf8'));
+  manifest[stale] = legacy.fingerprint;
+  await writeJson(root, MANIFEST_PATH, manifest);
   const edited = (await fs.readFile(stalePath, 'utf8')).replace(
     'Follow the project guide:',
     'Follow my manual contract note and the project guide:',
@@ -570,11 +618,11 @@ test('changed metadata is a conflict, even if the Markdown body is untouched', a
   const root = await fixture(t);
   const config = defaults();
   await generate(root, config);
-  const file = '.agents/skills/my-skill-gweh-quality/SKILL.md';
+  const file = '.agents/skills/my-skill-gweh/SKILL.md';
   const location = path.join(root, file);
   await fs.writeFile(
     location,
-    (await fs.readFile(location, 'utf8')).replace('name: my-skill-gweh-quality', 'name: changed'),
+    (await fs.readFile(location, 'utf8')).replace('name: my-skill-gweh', 'name: changed'),
   );
   const before = await snapshot(root);
   const result = await generate(root, { ...config, docsLanguage: 'id' });

@@ -67,6 +67,6 @@ test('existing AGENTS content and custom folder remain portable', async (t) => {
   await generate(dir, c);
   assert.match(await fs.readFile(path.join(dir, 'AGENTS.md'), 'utf8'), /^Existing instructions/);
   const files = await render(dir, c);
-  assert.ok(files['.github/skills/my-skill-gweh-quality/SKILL.md']);
+  assert.ok(files['.github/skills/my-skill-gweh/SKILL.md']);
   assert.throws(() => safe(dir, '../outside'));
 });

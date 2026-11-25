@@ -28,55 +28,22 @@ const skillGroups: Record<Skill, 'engineering' | 'application'> = {
   mascot: 'application',
 };
 
-const skillDescriptions: Record<Skill, Record<Language, string>> = {
-  quality: {
-    en: 'Use for module boundaries, code organization, abstraction choices, and maintainability reviews.',
-    id: 'Gunakan untuk batas modul, susunan kode, pilihan abstraksi, dan review kemudahan pemeliharaan.',
-  },
-  docs: {
-    en: 'Use when a change affects behavior, setup, contracts, operations, or project documentation.',
-    id: 'Gunakan saat perubahan memengaruhi perilaku, setup, kontrak, operasi, atau dokumentasi proyek.',
-  },
+const skillTopics: Record<Skill, Record<Language, string>> = {
+  quality: { en: 'code organization', id: 'organisasi kode' },
+  docs: { en: 'project documentation', id: 'dokumentasi proyek' },
   contracts: {
-    en: 'Use when changing API behavior, authorization, ownership, privacy, or persistence boundaries.',
-    id: 'Gunakan saat mengubah perilaku API, otorisasi, ownership, privasi, atau batas persistence.',
+    en: 'API contracts, authorization, and privacy',
+    id: 'kontrak API, otorisasi, dan privasi',
   },
-  testing: {
-    en: 'Use to plan or review regression coverage for changed behavior and failure cases.',
-    id: 'Gunakan untuk merencanakan atau meninjau test regresi bagi perilaku dan kasus gagal yang berubah.',
-  },
-  'ui-size': {
-    en: 'Use when reviewing large UI components or deciding whether a component should be split.',
-    id: 'Gunakan saat meninjau komponen UI besar atau menentukan apakah komponen perlu dipecah.',
-  },
-  'zero-any': {
-    en: 'Use when editing TypeScript types or reviewing `any` and type-suppression usage.',
-    id: 'Gunakan saat mengedit tipe TypeScript atau meninjau penggunaan `any` dan penonaktifan tipe.',
-  },
-  routes: {
-    en: 'Use when changing route registration, URL behavior, middleware, or navigation.',
-    id: 'Gunakan saat mengubah registrasi route, perilaku URL, middleware, atau navigasi.',
-  },
-  forms: {
-    en: 'Use when implementing form fields, validation, submission, and visible error states.',
-    id: 'Gunakan saat membuat field form, validasi, submit, dan status error yang terlihat.',
-  },
-  'ui-tests': {
-    en: 'Use when testing interactive UI behavior and user-visible outcomes.',
-    id: 'Gunakan saat menguji interaksi UI dan hasil yang terlihat oleh pengguna.',
-  },
-  accessibility: {
-    en: 'Use when changing controls, keyboard flow, focus behavior, or accessible names.',
-    id: 'Gunakan saat mengubah kontrol, alur keyboard, focus, atau nama aksesibel.',
-  },
-  mascot: {
-    en: 'Use when a developer asks to design a project mascot or create consistent mascot image variations.',
-    id: 'Gunakan saat developer meminta desain maskot proyek atau variasi gambar maskot yang konsisten.',
-  },
-  dependencies: {
-    en: 'Use when adding, updating, or removing project dependencies.',
-    id: 'Gunakan saat menambah, memperbarui, atau menghapus dependency proyek.',
-  },
+  testing: { en: 'regression testing', id: 'test regresi' },
+  'ui-size': { en: 'UI component size', id: 'ukuran komponen UI' },
+  'zero-any': { en: 'TypeScript types', id: 'tipe TypeScript' },
+  routes: { en: 'routes and navigation', id: 'route dan navigasi' },
+  forms: { en: 'forms and validation', id: 'form dan validasi' },
+  'ui-tests': { en: 'interactive UI testing', id: 'test UI interaktif' },
+  accessibility: { en: 'UI accessibility', id: 'aksesibilitas UI' },
+  mascot: { en: 'mascot design', id: 'desain maskot' },
+  dependencies: { en: 'project dependencies', id: 'dependency proyek' },
 };
 
 export function skillGuidePath(output: string, skill: Skill): string {
@@ -200,11 +167,29 @@ function mascotConceptMarkdown(language: Language): string {
   ].join('\n\n');
 }
 
-function nativeSkillMarkdown(skill: Skill, file: string, config: Config): string {
+function nativeSkillDescription(config: Config): string {
   const language = config.docsLanguage;
-  const canonicalGuide = localLink(file, skillGuidePath(config.output, skill));
-  const instruction = language === 'en' ? 'Follow the project guide:' : 'Ikuti panduan proyek:';
-  return `# ${skill}\n\n${instruction} [${skill}](${canonicalGuide})`;
+  const topics = config.skills.map((skill) => skillTopics[skill][language]).join(', ');
+  return language === 'en'
+    ? `Use when planning, implementing, or reviewing project changes involving ${topics}. Follow the matching section and its detailed guide.`
+    : `Gunakan saat merencanakan, membuat, atau meninjau perubahan proyek terkait ${topics}. Ikuti bagian yang sesuai dan panduan detailnya.`;
+}
+
+function nativeSkillMarkdown(file: string, config: Config): string {
+  const english = config.docsLanguage === 'en';
+  const contextLink = localLink(file, projectGuidePath(config.output, 'context'));
+  const intro = english
+    ? `Use relevant selected rules. Read [project context](${contextLink}), local agent instructions, and linked docs. Apply stack notes only when the project stack matches; otherwise follow local patterns and installed-version docs.`
+    : `Gunakan aturan sesuai tugas. Baca [konteks proyek](${contextLink}), instruksi agent lokal, dan dokumen tertaut. Terapkan catatan stack yang cocok; ikuti pola lokal dan dokumentasi versi terpasang.`;
+  return [
+    `# ${english ? 'Selected project skills' : 'Skill proyek pilihan'}`,
+    intro,
+    ...config.skills.map((skill) => {
+      const canonicalGuide = localLink(file, skillGuidePath(config.output, skill));
+      const guideLabel = english ? `${skill} project guide` : `panduan proyek ${skill}`;
+      return `## ${skill}\n\n${rules[skill][config.docsLanguage]}\n\n[${guideLabel}](${canonicalGuide})`;
+    }),
+  ].join('\n\n');
 }
 
 function projectMap(context: ProjectContext, config: Config): string {
@@ -340,6 +325,12 @@ function projectMap(context: ProjectContext, config: Config): string {
       `## ${heading('Existing agent instructions', 'Instruksi agent yang sudah ada')}`,
       '',
     );
+    lines.push(
+      heading(
+        'These paths identify project instruction entrypoints. Read the applicable files and task-relevant documents they reference; this map records paths, not their full policy content.',
+        'Path ini menunjukkan entrypoint instruksi proyek. Baca file yang berlaku dan dokumen relevan yang dirujuknya; peta ini mencatat path, bukan seluruh isi kebijakannya.',
+      ),
+    );
     lines.push(context.instructions.map((item) => `- ${code(item)}`).join('\n'));
   }
   if (context.existingSkills.length) {
@@ -428,10 +419,19 @@ export function renderDocuments(
     skills.length
       ? `## ${title}\n\n${skills.map((skill) => `- [${skill}](${skillGroups[skill]}/${skill}.md)`).join('\n')}`
       : '';
+  const nativeSkillDirectories = [...new Set(config.agents.map(skillDirectory))];
+  const nativeSkillDirectoryForInstruction = (file: string): string => {
+    if (file === 'CLAUDE.md') return '.claude/skills';
+    if (file === '.github/copilot-instructions.md') return '.github/skills';
+    if (file === '.windsurf/rules/my-skill-gweh.md') return '.windsurf/skills';
+    return nativeSkillDirectories.includes('.agents/skills')
+      ? '.agents/skills'
+      : (nativeSkillDirectories[0] ?? '.agents/skills');
+  };
   const pointer = (file: string): string =>
     english
-      ? `Start with the [index](${localLink(file, indexFile)}); read only the relevant skill guide. Open the [project workflow](${localLink(file, workflowFile)}) before running checks or changing Git state, and follow more specific repository instructions. For database work, ask whether production may be reset: if yes, edit existing migrations; if no, add a data-preserving migration.\n`
-      : `Mulai dari [index](${localLink(file, indexFile)}); baca hanya panduan skill yang relevan. Buka [workflow proyek](${localLink(file, workflowFile)}) sebelum menjalankan pemeriksaan atau mengubah state Git, lalu ikuti instruksi repository yang lebih spesifik. Untuk tugas database, tanyakan apakah production boleh di-fresh: jika boleh, edit migrasi yang ada; jika tidak, tambahkan migrasi yang menjaga data.\n`;
+      ? `Start with the [index](${localLink(file, indexFile)}). Before editing code, read the [my-skill-gweh skill](${localLink(file, `${nativeSkillDirectoryForInstruction(file)}/my-skill-gweh/SKILL.md`)}) and follow its matching section; read only the relevant skill guide linked from that section. Open the [project workflow](${localLink(file, workflowFile)}) before running checks or changing Git state, and follow more specific repository instructions. For database work, ask whether production may be reset: if yes, edit existing migrations; if no, add a data-preserving migration.\n`
+      : `Mulai dari [index](${localLink(file, indexFile)}). Sebelum mengubah kode, baca [skill my-skill-gweh](${localLink(file, `${nativeSkillDirectoryForInstruction(file)}/my-skill-gweh/SKILL.md`)}) dan ikuti bagian yang sesuai; baca hanya panduan skill yang ditautkan pada bagian tersebut. Buka [workflow proyek](${localLink(file, workflowFile)}) sebelum menjalankan pemeriksaan atau mengubah state Git, lalu ikuti instruksi repository yang lebih spesifik. Untuk tugas database, tanyakan apakah production boleh di-fresh: jika boleh, edit migrasi yang ada; jika tidak, tambahkan migrasi yang menjaga data.\n`;
 
   documents[indexFile] = {
     body:
@@ -508,16 +508,13 @@ export function renderDocuments(
     }
   }
 
-  for (const directory of new Set(config.agents.map(skillDirectory))) {
-    for (const id of config.skills) {
-      const name = `my-skill-gweh-${id}`;
-      const file = `${directory}/${name}/SKILL.md`;
-      const description = skillDescriptions[id][language];
-      documents[file] = {
-        frontmatter: `---\nname: ${name}\ndescription: ${description}\n---\n`,
-        body: `${nativeSkillMarkdown(id, file, config)}\n`,
-      };
-    }
+  for (const directory of nativeSkillDirectories) {
+    const name = 'my-skill-gweh';
+    const file = `${directory}/${name}/SKILL.md`;
+    documents[file] = {
+      frontmatter: `---\nname: ${name}\ndescription: ${nativeSkillDescription(config)}\n---\n`,
+      body: `${nativeSkillMarkdown(file, config)}\n`,
+    };
   }
   assertDistinctPaths(root, [...Object.keys(documents), CONFIG_PATH, MANIFEST_PATH, BASELINE_PATH]);
   return documents;

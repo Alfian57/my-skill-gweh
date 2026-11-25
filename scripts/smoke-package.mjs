@@ -76,10 +76,7 @@ try {
   ]) {
     assert.deepEqual(report[field], [], `doctor ${field}`);
   }
-  const skill = await readFile(
-    path.join(project, '.agents/skills/my-skill-gweh-quality/SKILL.md'),
-    'utf8',
-  );
+  const skill = await readFile(path.join(project, '.agents/skills/my-skill-gweh/SKILL.md'), 'utf8');
   assert.ok(skill.startsWith('---\n'));
   const installedMetadata = JSON.parse(
     await readFile(path.join(installed, 'package.json'), 'utf8'),

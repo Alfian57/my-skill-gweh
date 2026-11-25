@@ -185,6 +185,10 @@ test('skill enable and disable use the update safety flow and preserve project m
   assert.deepEqual(updated.skills, ['quality']);
   await assert.rejects(fs.access(guide));
   await assert.rejects(fs.access(path.join(root, '.agents/skills/my-skill-gweh-mascot/SKILL.md')));
+  assert.doesNotMatch(
+    await fs.readFile(path.join(root, '.agents/skills/my-skill-gweh/SKILL.md'), 'utf8'),
+    /^## mascot$/mu,
+  );
   assert.ok(output.some((line) => line.includes('backup:')));
   assert.equal(await fs.readFile(profile, 'utf8'), '# Mascot identity\n');
   assert.equal(await fs.readFile(asset, 'utf8'), 'mascot reference');
@@ -531,13 +535,10 @@ test('interactive update can skip a conflict and apply other safe files', async 
   await writeJson(root, CONFIG_PATH, config);
   const { generate } = await import('../dist/generator.js');
   await generate(root, config);
-  const native = path.join(root, '.agents/skills/my-skill-gweh-quality/SKILL.md');
+  const native = path.join(root, '.agents/skills/my-skill-gweh/SKILL.md');
   await fs.writeFile(
     native,
-    (await fs.readFile(native, 'utf8')).replace(
-      'name: my-skill-gweh-quality',
-      'name: my-custom-quality',
-    ),
+    (await fs.readFile(native, 'utf8')).replace('name: my-skill-gweh', 'name: my-custom-quality'),
   );
   await writeJson(root, CONFIG_PATH, { ...config, docsLanguage: 'id' });
   const output = [];

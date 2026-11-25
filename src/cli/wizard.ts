@@ -96,8 +96,8 @@ function detectedSummary(detection: Detection, language: Language): string {
   const lines = [
     stack ||
       (english
-        ? 'No supported language or framework detected.'
-        : 'Bahasa atau framework yang didukung belum terdeteksi.'),
+        ? 'No cataloged language or framework detected; generic guidance will still follow project patterns.'
+        : 'Bahasa atau framework dalam katalog belum terdeteksi; panduan umum tetap mengikuti pola proyek.'),
   ];
   if (detection.ecosystems.length) {
     lines.push(
@@ -279,8 +279,8 @@ export async function configure(
   config.skills = answer(
     await io.multiselect({
       message: english
-        ? 'Project skills (engineering and optional workflows)'
-        : 'Skill proyek (engineering dan alur opsional)',
+        ? 'Skills to include in the single native skill (select relevant categories)'
+        : 'Skill yang dimasukkan ke satu skill native (pilih kategori yang relevan)',
       options: skillIds.map((value) => ({
         value,
         label: skillLabels[config.language][value],
