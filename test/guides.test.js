@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { defaults } from '../dist/config.js';
-import { skillIds } from '../dist/catalog.js';
+import { rules, skillIds } from '../dist/catalog.js';
 import { doctor, isHealthy } from '../dist/doctor.js';
 import { generate } from '../dist/generator.js';
 import { localLink, projectGuidePath, render, skillGuidePath } from '../dist/render.js';
@@ -19,13 +19,17 @@ test('every selected skill renders detailed guidance and native agent instructio
   const root = await fixture(t);
   const config = { ...defaults(), skills: [...skillIds] };
   const files = await render(root, config);
+  const nativeSkillFile = '.agents/skills/my-skill-gweh/SKILL.md';
+  const nativeSkill = files[nativeSkillFile];
+  assert.ok(nativeSkill);
+  assert.match(nativeSkill, /^---\nname: my-skill-gweh\n/mu);
+  assert.match(files['AGENTS.md'], /Before editing code, read the \[my-skill-gweh skill\]/u);
+  assert.ok(files['AGENTS.md'].includes('(.agents/skills/my-skill-gweh/SKILL.md)'));
+  assert.ok(files['CLAUDE.md'].includes('(.claude/skills/my-skill-gweh/SKILL.md)'));
 
   for (const skill of config.skills) {
     const guide = files[skillGuidePath(config.output, skill)];
-    const nativeSkillFile = `.agents/skills/my-skill-gweh-${skill}/SKILL.md`;
-    const nativeSkill = files[nativeSkillFile];
     assert.ok(guide, `${skill} guide exists`);
-    assert.ok(nativeSkill, `${skill} native skill exists`);
     assert.ok(
       (guide.match(/^## /gmu) ?? []).length >= (skill === 'mascot' ? 1 : 2),
       `${skill} has discoverable sections`,
@@ -36,7 +40,8 @@ test('every selected skill renders detailed guidance and native agent instructio
           2,
       );
     assert.match(guide, /^- /mu, `${skill} has actionable rules`);
-    assert.match(nativeSkill, /Follow the project guide:|Ikuti panduan proyek:/u);
+    assert.match(nativeSkill, new RegExp(`^## ${skill}$`, 'mu'));
+    assert.ok(nativeSkill.includes(rules[skill][config.docsLanguage]));
     assert.ok(
       nativeSkill.includes(`(${localLink(nativeSkillFile, skillGuidePath(config.output, skill))})`),
     );
@@ -44,14 +49,19 @@ test('every selected skill renders detailed guidance and native agent instructio
   }
 
   const nativeSkills = Object.keys(files).filter((file) =>
-    /\/my-skill-gweh-[^/]+\/SKILL\.md$/u.test(file),
+    /\/my-skill-gweh\/SKILL\.md$/u.test(file),
   );
-  assert.ok(nativeSkills.length > config.skills.length);
+  assert.equal(nativeSkills.length, 4);
   for (const file of nativeSkills) {
-    const skill = file.match(/\/my-skill-gweh-([^/]+)\/SKILL\.md$/u)?.[1];
-    assert.ok(skill && config.skills.includes(skill));
-    assert.ok(files[file].includes(`(${localLink(file, skillGuidePath(config.output, skill))})`));
+    for (const skill of config.skills) {
+      assert.match(files[file], new RegExp(`^## ${skill}$`, 'mu'));
+      assert.ok(files[file].includes(`(${localLink(file, skillGuidePath(config.output, skill))})`));
+    }
   }
+  assert.equal(
+    Object.keys(files).some((file) => /\/my-skill-gweh-[^/]+\/SKILL\.md$/u.test(file)),
+    false,
+  );
 
   assert.match(files[`${config.output}/README.md`], /engineering\/quality\.md/u);
   assert.match(files[`${config.output}/README.md`], /project\/context\.md/u);
@@ -66,7 +76,7 @@ test('mascot guidance localizes its full workflow and stays opt-in for custom ou
   const output = 'team docs/agent guides (#1)';
   const absent = await render(root, { ...defaults(), output, agents: ['codex'] });
   assert.equal(absent[skillGuidePath(output, 'mascot')], undefined);
-  assert.equal(absent['.agents/skills/my-skill-gweh-mascot/SKILL.md'], undefined);
+  assert.doesNotMatch(absent['.agents/skills/my-skill-gweh/SKILL.md'], /^## mascot$/mu);
 
   const expected = {
     en: [
@@ -91,11 +101,12 @@ test('mascot guidance localizes its full workflow and stays opt-in for custom ou
     const files = await render(root, config);
     const guide = files[skillGuidePath(output, 'mascot')];
     const concepts = files[`${output}/application/mascot-concepts.md`];
-    const adapterPath = '.agents/skills/my-skill-gweh-mascot/SKILL.md';
+    const adapterPath = '.agents/skills/my-skill-gweh/SKILL.md';
     const adapter = files[adapterPath];
     assert.ok(guide);
     assert.ok(concepts);
     assert.ok(adapter);
+    assert.match(adapter, new RegExp(language === 'en' ? 'mascot design' : 'desain maskot', 'u'));
     for (const phrase of expected[language]) assert.ok(guide.includes(phrase), phrase);
     assert.ok(
       concepts.includes(language === 'en' ? 'four separate PNGs' : 'empat file PNG terpisah'),
@@ -108,6 +119,7 @@ test('mascot guidance localizes its full workflow and stays opt-in for custom ou
       ),
     );
     assert.ok(guide.length < 1_500, `Mascot entry guide should stay concise (${language})`);
+    assert.match(adapter, /^## mascot$/mu);
     assert.ok(adapter.includes(`(${localLink(adapterPath, skillGuidePath(output, 'mascot'))})`));
     assert.match(files[`${output}/README.md`], /application\/mascot\.md/u);
   }
@@ -140,6 +152,10 @@ test('turning off mascot guidance preserves project identity notes and image ass
   );
   await assert.rejects(fs.access(path.join(root, skillGuidePath(output, 'mascot'))));
   await assert.rejects(fs.access(path.join(root, '.agents/skills/my-skill-gweh-mascot/SKILL.md')));
+  assert.doesNotMatch(
+    await fs.readFile(path.join(root, '.agents/skills/my-skill-gweh/SKILL.md'), 'utf8'),
+    /^## mascot$/mu,
+  );
   await assert.rejects(fs.access(path.join(root, `${output}/application/mascot-concepts.md`)));
   assert.equal(
     await fs.readFile(path.join(root, profile), 'utf8'),
@@ -156,7 +172,7 @@ test('database migration policy is always available even when contracts is optio
     const config = { ...defaults(), docsLanguage: language, skills: ['contracts'] };
     const files = await render(root, config);
     const guide = files[skillGuidePath(config.output, 'contracts')];
-    const nativeSkill = files['.agents/skills/my-skill-gweh-contracts/SKILL.md'];
+    const nativeSkill = files['.agents/skills/my-skill-gweh/SKILL.md'];
     const alwaysOn = files['AGENTS.md'];
 
     assert.match(
@@ -169,6 +185,7 @@ test('database migration policy is always available even when contracts is optio
       guide,
       /ask whether production may be reset|tanyakan apakah production boleh di-fresh/u,
     );
+    assert.match(nativeSkill, /^## contracts$/mu);
     assert.match(nativeSkill, /engineering\/contracts\.md/u);
     assert.doesNotMatch(nativeSkill, /fresh database reset|database boleh di-fresh/u);
   }
@@ -200,6 +217,7 @@ test('project map uses manifest and path evidence without running scripts or exp
 
   const config = { ...defaults(), output: 'app/ai-agent-docs', stack: ['laravel'] };
   await generate(root, config);
+  await generate(root, config);
   const context = await fs.readFile(
     path.join(root, projectGuidePath(config.output, 'context')),
     'utf8',
@@ -215,6 +233,7 @@ test('project map uses manifest and path evidence without running scripts or exp
   assert.match(context, /tests\/Feature\/UserTest\.php/u);
   assert.match(context, /AGENTS\.md/u);
   assert.match(context, /\.agents\/skills\/existing\/SKILL\.md/u);
+  assert.doesNotMatch(context, /\.agents\/skills\/my-skill-gweh\/SKILL\.md/u);
   assert.doesNotMatch(context, /never-leak-this-value/u);
   assert.doesNotMatch(context, /ai-agent-docs\//u);
   assert.equal(
@@ -283,11 +302,12 @@ test('native skills keep all relevant context and examples match the selected st
     skills: ['routes', 'zero-any', 'forms'],
     stack: ['gin'],
   });
-  const routesNative = files['.agents/skills/my-skill-gweh-routes/SKILL.md'];
-  const zeroAnyNative = files['.agents/skills/my-skill-gweh-zero-any/SKILL.md'];
-  assert.match(routesNative, /application\/routes\.md/u);
-  assert.match(zeroAnyNative, /engineering\/zero-any\.md/u);
-  assert.doesNotMatch(routesNative, /For Gin|Untuk Gin/u);
+  const native = files['.agents/skills/my-skill-gweh/SKILL.md'];
+  assert.match(native, /^## routes$/mu);
+  assert.match(native, /^## zero-any$/mu);
+  assert.match(native, /application\/routes\.md/u);
+  assert.match(native, /engineering\/zero-any\.md/u);
+  assert.doesNotMatch(native, /For Gin|Untuk Gin/u);
   assert.doesNotMatch(files[skillGuidePath('ai-agent-docs', 'routes')], /Laravel: named route/u);
   assert.doesNotMatch(
     files[skillGuidePath('ai-agent-docs', 'forms')],
@@ -354,7 +374,51 @@ test('agent compatibility outputs only the necessary instruction entrypoint', as
   const files = await render(root, { ...defaults(), agents: ['claude'], skills: ['quality'] });
   assert.ok(files['CLAUDE.md']);
   assert.equal(files['AGENTS.md'], undefined);
-  assert.ok(files['.claude/skills/my-skill-gweh-quality/SKILL.md']);
+  assert.ok(files['.claude/skills/my-skill-gweh/SKILL.md']);
+  assert.ok(files['CLAUDE.md'].includes('(.claude/skills/my-skill-gweh/SKILL.md)'));
+});
+
+test('each native agent entrypoint links to the skill directory it uses', async (t) => {
+  const root = await fixture(t);
+  const cases = [
+    {
+      agent: 'codex',
+      instruction: 'AGENTS.md',
+      skillFile: '.agents/skills/my-skill-gweh/SKILL.md',
+      skillLink: '.agents/skills/my-skill-gweh/SKILL.md',
+    },
+    {
+      agent: 'copilot',
+      instruction: '.github/copilot-instructions.md',
+      skillFile: '.github/skills/my-skill-gweh/SKILL.md',
+      skillLink: 'skills/my-skill-gweh/SKILL.md',
+    },
+    {
+      agent: 'windsurf',
+      instruction: '.windsurf/rules/my-skill-gweh.md',
+      skillFile: '.windsurf/skills/my-skill-gweh/SKILL.md',
+      skillLink: '../skills/my-skill-gweh/SKILL.md',
+    },
+    {
+      agent: 'windsurf',
+      instruction: 'AGENTS.md',
+      skillFile: '.windsurf/skills/my-skill-gweh/SKILL.md',
+      skillLink: '.windsurf/skills/my-skill-gweh/SKILL.md',
+    },
+  ];
+
+  for (const scenario of cases) {
+    const files = await render(root, {
+      ...defaults(),
+      agents: [scenario.agent],
+      skills: ['quality'],
+    });
+    assert.ok(files[scenario.skillFile], `${scenario.agent} native skill exists`);
+    assert.ok(
+      files[scenario.instruction].includes(`(${scenario.skillLink})`),
+      `${scenario.instruction} points to ${scenario.skillFile}`,
+    );
+  }
 });
 
 test('dependency evidence does not claim a missing Composer lockfile or wrong JS lockfile', async (t) => {

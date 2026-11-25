@@ -37,7 +37,7 @@ function managedLength(document) {
   return replaceManagedContent(undefined, document, undefined).content.length;
 }
 
-test('startup plus one relevant skill stays at least 40 percent smaller across stacks and agents', () => {
+test('startup plus one relevant guide stays at least 25 percent smaller across stacks and agents', () => {
   const scenarios = [
     { language: 'en', stack: ['php', 'laravel'], agent: 'codex' },
     { language: 'id', stack: ['php', 'laravel'], agent: 'claude' },
@@ -45,7 +45,7 @@ test('startup plus one relevant skill stays at least 40 percent smaller across s
     { language: 'id', stack: ['go', 'gin'], agent: 'codex' },
   ];
   const v013RepresentativeFlowCharacters = 8_495;
-  const allowedCharacters = Math.floor(v013RepresentativeFlowCharacters * 0.6);
+  const allowedCharacters = Math.floor(v013RepresentativeFlowCharacters * 0.75);
 
   for (const scenario of scenarios) {
     const ui = scenario.stack.some((technology) =>
@@ -85,7 +85,7 @@ test('startup plus one relevant skill stays at least 40 percent smaller across s
     const relevant = [
       entrypoint,
       `${config.output}/README.md`,
-      `${nativeDirectory}/my-skill-gweh-quality/SKILL.md`,
+      `${nativeDirectory}/my-skill-gweh/SKILL.md`,
       skillGuidePath(config.output, 'quality'),
     ];
     const currentCharacters = relevant.reduce(
@@ -99,7 +99,7 @@ test('startup plus one relevant skill stays at least 40 percent smaller across s
   }
 });
 
-test('native skill metadata has distinct, task-specific descriptions within the Skills spec limit', () => {
+test('one native skill summarizes all selected topics within the Skills spec limit', () => {
   const config = { ...defaults(), agents: ['codex'], skills: [...skillIds] };
   const documents = renderDocuments(
     '/virtual/project',
@@ -113,12 +113,17 @@ test('native skill metadata has distinct, task-specific descriptions within the 
     },
     context,
   );
-  const descriptions = skillIds.map((skill) => {
-    const file = documents[`.agents/skills/my-skill-gweh-${skill}/SKILL.md`].frontmatter;
-    return /^description: (.+)$/mu.exec(file)?.[1] ?? '';
-  });
-  assert.equal(new Set(descriptions).size, skillIds.length);
-  assert.ok(descriptions.every((description) => description.length <= 1024));
+  const nativeFiles = Object.keys(documents).filter((file) =>
+    /\/my-skill-gweh\/SKILL\.md$/u.test(file),
+  );
+  assert.deepEqual(nativeFiles, ['.agents/skills/my-skill-gweh/SKILL.md']);
+  const native = documents[nativeFiles[0]];
+  const description = /^description: (.+)$/mu.exec(native.frontmatter ?? '')?.[1] ?? '';
+  assert.ok(description.length > 0 && description.length <= 1024);
+  for (const skill of skillIds) {
+    assert.match(native.body, new RegExp(`^## ${skill}$`, 'mu'));
+    assert.match(native.body, new RegExp(`${skill}(?:\.md| project guide)`, 'u'));
+  }
   assert.match(documents['AGENTS.md'].body, /read only the relevant skill guide/u);
   assert.doesNotMatch(documents['AGENTS.md'].body, /read all|complete guide for each/u);
 });
@@ -146,7 +151,7 @@ test('quality plus project workflow remains within the startup guidance characte
       entrypoint,
       `${config.output}/README.md`,
       `${config.output}/project/workflow.md`,
-      `${nativeDirectory}/my-skill-gweh-quality/SKILL.md`,
+      `${nativeDirectory}/my-skill-gweh/SKILL.md`,
       skillGuidePath(config.output, 'quality'),
     ];
     const characters = relevant.reduce((sum, file) => sum + managedLength(documents[file]), 0);

@@ -387,7 +387,9 @@ async function collectGuidance(
   ]) {
     if (!(await exists(root, directory))) continue;
     for (const file of await collectPaths(root, directory, 30, output, budget)) {
-      if (!file.endsWith('/SKILL.md') || file.includes('/my-skill-gweh-')) continue;
+      if (!file.endsWith('/SKILL.md') || /\/my-skill-gweh(?:-[^/]+)?\/SKILL\.md$/u.test(file)) {
+        continue;
+      }
       skills.push(file);
       if (skills.length >= 24) return { instructions, skills };
     }
