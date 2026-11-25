@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Alfian57/my-skill-gweh/compare/my-skill-gweh-v0.2.0...my-skill-gweh-v0.3.0) (2026-11-25)
+
+
+### Features
+
+* consolidate native skills with stack-aware guidance ([#4](https://github.com/Alfian57/my-skill-gweh/issues/4)) ([32c68e2](https://github.com/Alfian57/my-skill-gweh/commit/32c68e2a7736c5d9ea5699b116b7d9378f3a9bf0))
+
 ## [0.2.0](https://github.com/Alfian57/my-skill-gweh/compare/my-skill-gweh-v0.1.5...my-skill-gweh-v0.2.0) (2026-11-14)
 
 
